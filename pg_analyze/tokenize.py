@@ -64,6 +64,34 @@ def strip_comments(text: str) -> str:
 #============================================
 
 
+def strip_heredocs(text: str) -> str:
+	"""
+	Remove heredoc bodies while preserving line count.
+
+	This prevents extractors from accidentally matching inside heredoc content.
+	"""
+	out_lines: list[str] = []
+	heredoc_end: str | None = None
+
+	for line in text.splitlines(keepends=True):
+		if heredoc_end is None:
+			heredoc_end = _scan_heredoc_terminator(line)
+			out_lines.append(line)
+			continue
+
+		if line.strip() == heredoc_end:
+			out_lines.append("\n" if line.endswith("\n") else "")
+			heredoc_end = None
+			continue
+
+		out_lines.append("\n" if line.endswith("\n") else "")
+
+	return "".join(out_lines)
+
+
+#============================================
+
+
 def _scan_heredoc_terminator(line: str) -> str | None:
 	"""
 	Detect a heredoc introducer outside of strings and return its terminator token.

@@ -102,15 +102,16 @@ def analyze_file(file_path: str) -> dict:
 	return analyze_text(text=text, file_path=file_path)
 
 def analyze_text(*, text: str, file_path: str) -> dict:
-	stripped = pg_analyze.tokenize.strip_comments(text)
-	newlines = pg_analyze.tokenize.build_newline_index(stripped)
+	clean = pg_analyze.tokenize.strip_heredocs(pg_analyze.tokenize.strip_comments(text))
+	newlines = pg_analyze.tokenize.build_newline_index(clean)
 
-	macros = pg_analyze.extract_evaluators.extract_macros(stripped, newlines=newlines)
-	widgets, _pgml_info = pg_analyze.extract_widgets.extract(stripped, newlines=newlines)
-	answers = pg_analyze.extract_answers.extract(stripped, newlines=newlines)
-	evaluators = pg_analyze.extract_evaluators.extract(stripped, newlines=newlines)
+	macros = pg_analyze.extract_evaluators.extract_macros(clean, newlines=newlines)
+	widgets, _pgml_info = pg_analyze.extract_widgets.extract(clean, newlines=newlines)
+	answers = pg_analyze.extract_answers.extract(clean, newlines=newlines)
+	evaluators = pg_analyze.extract_evaluators.extract(clean, newlines=newlines)
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
-	has_multianswer = bool(_MULTIANSWER_RX.search(stripped))
+	has_multianswer = bool(_MULTIANSWER_RX.search(clean))
+	named_rule_refs = _extract_named_rule_refs(evaluators)
 
 	report = {
 		"file": file_path,
@@ -154,6 +155,7 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"reasons": reasons,
 		"wiring_empty": wiring_empty,
 		"has_multianswer": has_multianswer,
+		"named_rule_refs": named_rule_refs,
 	}
 
 
@@ -179,6 +181,21 @@ def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> 
 
 
 _MULTIANSWER_RX = re.compile(r"\bMultiAnswer\s*\(")
+
+_NAMED_RULE_REF_RX = re.compile(r"\bnamed_ans_rule\s*\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+
+def _extract_named_rule_refs(evaluators: list[dict]) -> list[str]:
+	names: list[str] = []
+	for ev in evaluators:
+		expr = ev.get("expr", "")
+		if not isinstance(expr, str):
+			continue
+		for m in _NAMED_RULE_REF_RX.finditer(expr):
+			name = m.group(1)
+			if name not in names:
+				names.append(name)
+	return names
 
 
 #============================================

@@ -24,6 +24,16 @@ import pg_analyze.main
 			lambda r: (r["ans_count"] == 1),
 		),
 		(
+			"heredoc_body_parens_in_call_args",
+			"loadMacros(\n"
+			"  <<END_HERE,\n"
+			") ) ) # not code\n"
+			"END_HERE\n"
+			"  \"PGstandard.pl\",\n"
+			");\n",
+			lambda r: ("PGstandard.pl" in r["loadMacros"]),
+		),
+		(
 			"loadmacros_mixed_quotes_whitespace",
 			"loadMacros(  \"PGstandard.pl\" ,\n"
 			"  'MathObjects.pl' ,  \"parserRadioButtons.pl\"  );\n"
@@ -44,6 +54,12 @@ import pg_analyze.main
 			"$ma = MultiAnswer(Real(1), Real(2));\n"
 			"ANS($ma->cmp());\n",
 			lambda r: ("multipart" in r["types"]),
+		),
+		(
+			"named_ans_rule_evaluator_ref",
+			"NAMED_ANS_RULE('ans1');\n"
+			"ANS(named_ans_rule('ans1'));\n",
+			lambda r: ("ans1" in r.get("named_rule_refs", [])),
 		),
 		(
 			"pgml_blanks_only",

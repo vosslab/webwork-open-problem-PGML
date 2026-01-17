@@ -14,3 +14,4 @@
 - Add `tests/conftest.py` to put the repo root on `sys.path` for pytest.
 - Remove per-file output options from `pg_analyze` (no per-file TSV/JSONL) to keep default behavior corpus-scale.
 - Add regression tests for common PG/PGML patterns (heredocs, multiline ANS, MultiAnswer, PGML blanks) and count PGML blanks as inputs.
+- Pre-strip heredoc bodies before running extractors and record `named_ans_rule(...)` references from evaluator expressions.
