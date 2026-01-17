@@ -48,6 +48,20 @@ import pg_analyze.main
 			lambda r: ("str_cmp" in r["evaluator_kinds"] and r["pgml_payload_evaluator_count"] == 1),
 		),
 		(
+			"pgml_star_spec_bare_var_in_begin_end_block",
+			"BEGIN_PGML\n"
+			"Answer: [____]*{$ans1}\n"
+			"END_PGML\n",
+			lambda r: ("pgml_star_spec" in r["evaluator_sources"] and r["pgml_star_spec_evaluator_count"] == 1),
+		),
+		(
+			"pgml_star_spec_cmp_in_begin_end_block",
+			"BEGIN_PGML\n"
+			"Answer: [_]*{Real(3)->cmp()}\n"
+			"END_PGML\n",
+			lambda r: ("cmp" in r["evaluator_kinds"] and r["pgml_star_spec_evaluator_count"] == 1),
+		),
+		(
 			"loadmacros_mixed_quotes_whitespace",
 			"loadMacros(  \"PGstandard.pl\" ,\n"
 			"  'MathObjects.pl' ,  \"parserRadioButtons.pl\"  );\n"

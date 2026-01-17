@@ -116,6 +116,14 @@ def classify(report: dict) -> tuple[dict, bool]:
 		types.append("numeric_entry")
 		add_reason("evaluator_or_ctor", "numeric")
 
+	has_pgml_embedded_evaluator = any(
+		(isinstance(e, dict) and e.get("source") in {"pgml_payload", "pgml_star_spec"})
+		for e in evaluators
+	)
+	if has_pgml_embedded_evaluator and ("numeric_entry" not in types) and ("fib_word" not in types):
+		types.append("numeric_entry")
+		add_reason("evaluator_or_ctor", "pgml_embedded")
+
 	if not types:
 		pgml_blank_count = int(pgml.get("blank_count", 0) or 0)
 		if (len(widgets) == 0) and (len(evaluators) == 0) and (pgml_blank_count > 0):

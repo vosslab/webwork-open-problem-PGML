@@ -238,8 +238,8 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 	widgets, _pgml_info = pg_analyze.extract_widgets.extract(clean, newlines=newlines)
 	answers = pg_analyze.extract_answers.extract(clean, newlines=newlines)
 	ans_evaluators = pg_analyze.extract_evaluators.extract(clean, newlines=newlines)
-	pgml_payload_evaluators = pg_analyze.extract_evaluators.extract_pgml_payload_evaluators(text, newlines=raw_newlines)
-	evaluators = ans_evaluators + pgml_payload_evaluators
+	pgml_payload_evaluators, pgml_star_spec_evaluators = pg_analyze.extract_evaluators.extract_pgml_embedded_evaluators(text, newlines=raw_newlines)
+	evaluators = ans_evaluators + pgml_payload_evaluators + pgml_star_spec_evaluators
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
 	has_multianswer = bool(_MULTIANSWER_RX.search(clean))
 	named_rule_refs = _extract_named_rule_refs(evaluators)
@@ -289,8 +289,10 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 
 	ans_call_evaluator_count = len(ans_evaluators)
 	pgml_payload_evaluator_count = len(pgml_payload_evaluators)
+	pgml_star_spec_evaluator_count = len(pgml_star_spec_evaluators)
 	ans_call_evaluator_kinds = [e.get("kind") for e in ans_evaluators if isinstance(e.get("kind"), str)]
 	pgml_payload_evaluator_kinds = [e.get("kind") for e in pgml_payload_evaluators if isinstance(e.get("kind"), str)]
+	pgml_star_spec_evaluator_kinds = [e.get("kind") for e in pgml_star_spec_evaluators if isinstance(e.get("kind"), str)]
 
 	record = {
 		"file": file_path,
@@ -303,8 +305,10 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"evaluator_sources": evaluator_sources,
 		"ans_call_evaluator_count": ans_call_evaluator_count,
 		"pgml_payload_evaluator_count": pgml_payload_evaluator_count,
+		"pgml_star_spec_evaluator_count": pgml_star_spec_evaluator_count,
 		"ans_call_evaluator_kinds": ans_call_evaluator_kinds,
 		"pgml_payload_evaluator_kinds": pgml_payload_evaluator_kinds,
+		"pgml_star_spec_evaluator_kinds": pgml_star_spec_evaluator_kinds,
 		"loadMacros": macros.get("loadMacros", []),
 		"reasons": reasons,
 		"wiring_empty": wiring_empty,
@@ -379,6 +383,7 @@ def _write_index(out_dir: str) -> None:
 		"Then:",
 		"- summary/evaluator_source_counts_all_files.tsv",
 		"- counts/evaluator_kind_counts_pgml_payload_only.tsv",
+		"- counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
 		"",
 		"Then:",
 		"- cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
@@ -434,7 +439,7 @@ def _tsv_meta(name: str) -> dict[str, str]:
 		},
 		"evaluator_source_counts.tsv": {
 			"unit": "each evaluator occurrence contributes to its source",
-			"notes": "sources are ans_call and pgml_payload",
+			"notes": "sources are ans_call, pgml_payload, and pgml_star_spec",
 		},
 		"macro_counts.tsv": {
 			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
@@ -446,11 +451,15 @@ def _tsv_meta(name: str) -> dict[str, str]:
 		},
 		"evaluator_counts.tsv": {
 			"unit": "each detected evaluator occurrence contributes 1",
-			"notes": "includes evaluators from ANS(...) and PGML blank payloads",
+			"notes": "includes evaluators from ANS(...) and PGML blank specs ({...} and *{...})",
 		},
 		"pgml_payload_evaluator_counts.tsv": {
 			"unit": "each detected PGML-payload evaluator occurrence contributes 1",
 			"notes": "only evaluators extracted from PGML blank payloads",
+		},
+		"pgml_star_spec_evaluator_counts.tsv": {
+			"unit": "each detected PGML-star-spec evaluator occurrence contributes 1",
+			"notes": "only evaluators extracted from PGML blank '*{...}' specs",
 		},
 		"type_by_widget.tsv": {
 			"unit": "each file contributes once per (type, widget_kind) pair",

@@ -71,6 +71,7 @@ def extract(stripped_text: str, *, newlines: list[int]) -> list[dict]:
 
 PGML_BLANK_RX = re.compile(r"\[[ \t]*_+[ \t]*\]")
 PGML_BLANK_WITH_PAYLOAD_RX = re.compile(r"\[[ \t]*_+[ \t]*\][ \t]*\{")
+PGML_BLANK_WITH_STAR_SPEC_RX = re.compile(r"\[[ \t]*_+[ \t]*\][ \t]*\*[ \t]*\{")
 
 
 def extract_pgml_payload_evaluators(text: str, *, newlines: list[int]) -> list[dict]:
@@ -85,23 +86,53 @@ def extract_pgml_payload_evaluators(text: str, *, newlines: list[int]) -> list[d
 	This intentionally avoids full Perl parsing: it scans known PGML regions and
 	uses a balanced brace walker to capture {...} payloads.
 	"""
-	evaluators: list[dict] = []
+	payload_evaluators, _star_spec_evaluators = extract_pgml_embedded_evaluators(text, newlines=newlines)
+	return payload_evaluators
+
+
+def extract_pgml_star_spec_evaluators(text: str, *, newlines: list[int]) -> list[dict]:
+	"""
+	Extract grading specs embedded in PGML blanks using the "*{...}" syntax.
+
+	A common PGML idiom is:
+	  [_____]*{$ans1}
+	  [__]*{$M1*$CV1}
+
+	This is a grading signal even when it does not contain a direct ->cmp().
+	"""
+	_payload_evaluators, star_spec_evaluators = extract_pgml_embedded_evaluators(text, newlines=newlines)
+	return star_spec_evaluators
+
+
+def extract_pgml_embedded_evaluators(text: str, *, newlines: list[int]) -> tuple[list[dict], list[dict]]:
+	"""
+	Extract embedded evaluator-like expressions inside PGML blanks.
+
+	Returns (pgml_payload_evaluators, pgml_star_spec_evaluators).
+	"""
+	payload: list[dict] = []
+	star_specs: list[dict] = []
 
 	for start, end in _pgml_regions(text):
 		block = text[start:end]
-		for payload, payload_abs_pos in _iter_pgml_blank_payloads(block, start_offset=start):
-			expr = _normalize_ws(payload)
-			evaluators.append(
-				{
-					"kind": _classify(expr),
-					"expr": expr,
-					"vars": _extract_vars(expr),
-					"line": pg_analyze.tokenize.pos_to_line(newlines, payload_abs_pos),
-					"source": "pgml_payload",
-				}
-			)
+		for source, expr_text, expr_abs_pos in _iter_pgml_blank_brace_specs(block, start_offset=start):
+			expr = _normalize_ws(expr_text)
+			kind = _classify(expr)
+			if source == "pgml_star_spec" and kind == "other":
+				kind = "star_spec"
+			evaluator = {
+				"kind": kind,
+				"expr": expr,
+				"vars": _extract_vars(expr),
+				"line": pg_analyze.tokenize.pos_to_line(newlines, expr_abs_pos),
+				"source": source,
+			}
+			if source == "pgml_payload":
+				payload.append(evaluator)
+			else:
+				star_specs.append(evaluator)
 
-	return evaluators
+	return payload, star_specs
 
 
 def _pgml_regions(text: str) -> list[tuple[int, int]]:
@@ -228,13 +259,21 @@ def _scan_heredoc_terminator(line: str) -> str | None:
 	return None
 
 
-def _iter_pgml_blank_payloads(block_text: str, *, start_offset: int) -> list[tuple[str, int]]:
-	out: list[tuple[str, int]] = []
+def _iter_pgml_blank_brace_specs(block_text: str, *, start_offset: int) -> list[tuple[str, str, int]]:
+	out: list[tuple[str, str, int]] = []
 	i = 0
 	while True:
-		m = PGML_BLANK_WITH_PAYLOAD_RX.search(block_text, i)
-		if not m:
+		m_payload = PGML_BLANK_WITH_PAYLOAD_RX.search(block_text, i)
+		m_star = PGML_BLANK_WITH_STAR_SPEC_RX.search(block_text, i)
+		if (m_payload is None) and (m_star is None):
 			break
+
+		if (m_payload is not None) and (m_star is not None):
+			m = m_payload if m_payload.start() <= m_star.start() else m_star
+		else:
+			m = m_payload if m_payload is not None else m_star
+
+		source = "pgml_payload" if m is m_payload else "pgml_star_spec"
 		brace_open = block_text.find("{", m.end() - 1)
 		if brace_open == -1:
 			i = m.end()
@@ -243,8 +282,8 @@ def _iter_pgml_blank_payloads(block_text: str, *, start_offset: int) -> list[tup
 		if brace_close == brace_open:
 			i = m.end()
 			continue
-		payload = block_text[brace_open + 1 : brace_close]
-		out.append((payload, start_offset + brace_open + 1))
+		expr = block_text[brace_open + 1 : brace_close]
+		out.append((source, expr, start_offset + brace_open + 1))
 		i = brace_close + 1
 	return out
 
@@ -304,7 +343,7 @@ def extract_pgml_blocks(text: str, *, newlines: list[int]) -> list[dict]:
 	- kind: BEGIN_PGML, BEGIN_PGML_HINT, BEGIN_PGML_SOLUTION, HEREDOC_PGML
 	- start_line: 1-based line
 	- blank_marker_count: number of [_] / [____] markers in the block
-	- has_payload: whether any blank appears with a {...} payload
+	- has_payload: whether any blank appears with a {...} payload or a "*{...}" spec
 	- text: the raw block text
 	"""
 	out: list[dict] = []
@@ -372,7 +411,7 @@ def _extract_pgml_heredoc_blocks(text: str, *, newlines: list[int]) -> list[dict
 
 def _pgml_block_info(block_text: str, *, start: int, kind: str, newlines: list[int], start_line: int | None = None) -> dict:
 	blank_marker_count = len(PGML_BLANK_RX.findall(block_text))
-	has_payload = 1 if bool(PGML_BLANK_WITH_PAYLOAD_RX.search(block_text)) else 0
+	has_payload = 1 if bool(PGML_BLANK_WITH_PAYLOAD_RX.search(block_text) or PGML_BLANK_WITH_STAR_SPEC_RX.search(block_text)) else 0
 	if start_line is None:
 		start_line = pg_analyze.tokenize.pos_to_line(newlines, start)
 	return {
@@ -426,6 +465,8 @@ def _classify(expr: str) -> str:
 		return "cmp"
 	if re.search(r"\bnamed_ans_rule\s*\(", expr):
 		return "named_rule"
+	if re.search(r"\b(ans_rule|answerRule|ans_box)\s*\(", expr):
+		return "ans_rule"
 	if re.search(r"\bradio_cmp\s*\(", expr):
 		return "radio_cmp"
 	if re.search(r"\bcheckbox_cmp\s*\(", expr):

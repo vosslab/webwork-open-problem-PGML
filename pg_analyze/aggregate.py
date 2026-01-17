@@ -86,6 +86,7 @@ OUTPUT_PATHS: dict[str, str] = {
 	"widget_counts.tsv": "counts/widget_kind_counts_all_files.tsv",
 	"evaluator_counts.tsv": "counts/evaluator_kind_counts_all_files.tsv",
 	"pgml_payload_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_payload_only.tsv",
+	"pgml_star_spec_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
 
 	# cross_tabs/
 	"type_by_widget.tsv": "cross_tabs/type_x_widget_kind_counts.tsv",
@@ -229,6 +230,7 @@ class Aggregator:
 
 		self.evaluator_source_counts: dict[str, int] = {}
 		self.pgml_payload_evaluator_counts: dict[str, int] = {}
+		self.pgml_star_spec_evaluator_counts: dict[str, int] = {}
 		self.type_by_evaluator_source: dict[tuple[str, str], int] = {}
 
 		self.macro_counts_unknown_pgml_blank: dict[str, int] = {}
@@ -359,12 +361,14 @@ class Aggregator:
 	def _add_coverage(self, record: dict, *, has_widgets: bool) -> None:
 		ans_call_count = int(record.get("ans_call_evaluator_count", 0) or 0)
 		pgml_payload_count = int(record.get("pgml_payload_evaluator_count", 0) or 0)
+		pgml_star_spec_count = int(record.get("pgml_star_spec_evaluator_count", 0) or 0)
+		pgml_count = pgml_payload_count + pgml_star_spec_count
 
-		if ans_call_count > 0 and pgml_payload_count > 0:
+		if ans_call_count > 0 and pgml_count > 0:
 			eval_bucket = "both"
 		elif ans_call_count > 0:
 			eval_bucket = "ans_only"
-		elif pgml_payload_count > 0:
+		elif pgml_count > 0:
 			eval_bucket = "pgml_only"
 		else:
 			eval_bucket = "none"
@@ -385,18 +389,27 @@ class Aggregator:
 				if isinstance(k, str) and k:
 					_inc(self.pgml_payload_evaluator_counts, k)
 
+		star_kinds = record.get("pgml_star_spec_evaluator_kinds", [])
+		if isinstance(star_kinds, list):
+			for k in star_kinds:
+				if isinstance(k, str) and k:
+					_inc(self.pgml_star_spec_evaluator_counts, k)
+
 		types = record.get("types", [])
 		if not isinstance(types, list) or not types:
 			types = ["other"]
 
 		ans_call_count = int(record.get("ans_call_evaluator_count", 0) or 0)
 		pgml_payload_count = int(record.get("pgml_payload_evaluator_count", 0) or 0)
+		pgml_star_spec_count = int(record.get("pgml_star_spec_evaluator_count", 0) or 0)
 
 		sources: list[str] = []
 		if ans_call_count > 0:
 			sources.append("ans_call")
 		if pgml_payload_count > 0:
 			sources.append("pgml_payload")
+		if pgml_star_spec_count > 0:
+			sources.append("pgml_star_spec")
 		if not sources:
 			sources = ["none"]
 
@@ -533,6 +546,7 @@ class Aggregator:
 		out["evaluator_coverage_reasons.tsv"] = _render_counts_tsv(list(self.evaluator_coverage_reasons.items()), key_name="reason")
 		out["evaluator_source_counts.tsv"] = _render_counts_tsv(list(self.evaluator_source_counts.items()), key_name="source")
 		out["pgml_payload_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_payload_evaluator_counts.items()), key_name="evaluator_kind")
+		out["pgml_star_spec_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_star_spec_evaluator_counts.items()), key_name="evaluator_kind")
 		out["type_by_evaluator_source.tsv"] = self._render_pair_counts_tsv(self.type_by_evaluator_source, left="type", right="evaluator_source")
 		out["needs_review.tsv"] = self._render_needs_review_tsv()
 		out["needs_review_bucket_counts.tsv"] = _render_counts_tsv(list(self.needs_review_bucket_counts.items()), key_name="bucket")
@@ -693,7 +707,7 @@ class Aggregator:
 		load_macros = record.get("loadMacros", [])
 		macros_top3 = ",".join(_macros_top3(load_macros if isinstance(load_macros, list) else []))
 		pgml_blank_markers = int(record.get("pgml_blank_marker_count", 0) or 0)
-		has_payload = 1 if int(record.get("pgml_payload_evaluator_count", 0) or 0) > 0 else 0
+		has_payload = 1 if (int(record.get("pgml_payload_evaluator_count", 0) or 0) > 0 or int(record.get("pgml_star_spec_evaluator_count", 0) or 0) > 0) else 0
 		confidence = float(record.get("confidence", 0.0))
 
 		evaluator_sources = record.get("evaluator_sources", [])
@@ -908,7 +922,8 @@ def _is_graph_like(load_macros: list[str]) -> bool:
 
 def unknown_pgml_blank_signature(record: dict) -> str:
 	pgml_blank_markers = int(record.get("pgml_blank_marker_count", 0) or 0)
-	has_payload = int(record.get("pgml_payload_evaluator_count", 0) or 0) > 0
+	has_payload = (int(record.get("pgml_payload_evaluator_count", 0) or 0) > 0) or (int(record.get("pgml_star_spec_evaluator_count", 0) or 0) > 0)
+	has_star_spec = int(record.get("pgml_star_spec_evaluator_count", 0) or 0) > 0
 	has_named_ans_rule = int(record.get("has_named_ans_rule_token", 0) or 0) > 0
 	has_ans_rule = int(record.get("has_ans_rule_token", 0) or 0) > 0
 	has_named_popup = int(record.get("has_named_popup_list_token", 0) or 0) > 0
@@ -918,6 +933,9 @@ def unknown_pgml_blank_signature(record: dict) -> str:
 
 	if pgml_blank_markers <= 0:
 		return "no_pgml_blank_markers"
+
+	if has_star_spec:
+		return "pgml_blank_star_spec_present"
 
 	if (not has_payload) and has_named_ans_rule:
 		return "pgml_blank_no_payload_named_ans_rule"
