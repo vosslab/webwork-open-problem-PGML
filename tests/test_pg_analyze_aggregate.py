@@ -140,7 +140,11 @@ def test_aggregate_reports_from_synthetic_pg_like_strings() -> None:
 	assert any(l.startswith("radio\tcmp\t1") for l in widget_by_evaluator_lines[1:])
 
 	coverage = _parse_counts_tsv(reports["coverage.tsv"])
-	assert coverage["widgets=some,evaluators=some"] == 3
-	assert coverage["widgets=some,evaluators=none"] == 1
-	assert coverage["widgets=none,evaluators=none"] == 1
-	assert coverage["widgets=none,evaluators=some"] == 0
+	assert coverage["widgets=some,eval=ans_only"] == 3
+	assert coverage["widgets=some,eval=none"] == 1
+	assert coverage["widgets=none,eval=none"] == 1
+	assert coverage["widgets=none,eval=ans_only"] == 0
+	assert coverage["widgets=none,eval=pgml_only"] == 0
+	assert coverage["widgets=none,eval=both"] == 0
+	assert coverage["widgets=some,eval=pgml_only"] == 0
+	assert coverage["widgets=some,eval=both"] == 0

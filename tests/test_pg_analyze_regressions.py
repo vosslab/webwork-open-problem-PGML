@@ -34,6 +34,20 @@ import pg_analyze.main
 			lambda r: ("PGstandard.pl" in r["loadMacros"]),
 		),
 		(
+			"pgml_payload_cmp_in_begin_end_block",
+			"BEGIN_PGML\n"
+			"Answer: [_]{Real(3)->cmp()}\n"
+			"END_PGML\n",
+			lambda r: ("cmp" in r["evaluator_kinds"] and r["pgml_payload_evaluator_count"] == 1),
+		),
+		(
+			"pgml_payload_str_cmp_in_heredoc",
+			"PGML::Format(<<END_PGML);\n"
+			"Answer: [_]{str_cmp('foo')}\n"
+			"END_PGML\n",
+			lambda r: ("str_cmp" in r["evaluator_kinds"] and r["pgml_payload_evaluator_count"] == 1),
+		),
+		(
 			"loadmacros_mixed_quotes_whitespace",
 			"loadMacros(  \"PGstandard.pl\" ,\n"
 			"  'MathObjects.pl' ,  \"parserRadioButtons.pl\"  );\n"

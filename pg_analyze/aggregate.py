@@ -159,10 +159,14 @@ class Aggregator:
 		self.type_by_evaluator: dict[tuple[str, str], int] = {}
 		self.widget_by_evaluator: dict[tuple[str, str], int] = {}
 		self.coverage: dict[str, int] = {
-			"widgets=none,evaluators=none": 0,
-			"widgets=none,evaluators=some": 0,
-			"widgets=some,evaluators=none": 0,
-			"widgets=some,evaluators=some": 0,
+			"widgets=none,eval=none": 0,
+			"widgets=none,eval=ans_only": 0,
+			"widgets=none,eval=pgml_only": 0,
+			"widgets=none,eval=both": 0,
+			"widgets=some,eval=none": 0,
+			"widgets=some,eval=ans_only": 0,
+			"widgets=some,eval=pgml_only": 0,
+			"widgets=some,eval=both": 0,
 		}
 
 		self.needs_review_bucket_counts: dict[str, int] = {}
@@ -171,6 +175,10 @@ class Aggregator:
 
 		self.evaluator_coverage_reasons: dict[str, int] = {}
 		self.ans_token_hist: dict[str, int] = {}
+
+		self.evaluator_source_counts: dict[str, int] = {}
+		self.pgml_payload_evaluator_counts: dict[str, int] = {}
+		self.type_by_evaluator_source: dict[tuple[str, str], int] = {}
 
 		self.macro_counts_unknown_pgml_blank: dict[str, int] = {}
 		self.macro_counts_eval_none_numeric_entry: dict[str, int] = {}
@@ -187,6 +195,7 @@ class Aggregator:
 		self._other_high_blank_heap: list[tuple[int, str, float, str, str]] = []
 		self._other_applet_heap: list[tuple[float, str, float, str, str]] = []
 		self._bucket_writers = BucketWriters(out_dir) if isinstance(out_dir, str) and out_dir else None
+		self._pgml_block_sampler = PgmlBlockSampler(out_dir) if isinstance(out_dir, str) and out_dir else None
 
 	def add_record(self, record: dict) -> None:
 		types = record.get("types", [])
@@ -235,6 +244,7 @@ class Aggregator:
 		if isinstance(ans_token_count, int):
 			_inc(self.ans_token_hist, count_bucket(ans_token_count))
 
+		self._add_evaluator_sources(record)
 		self._add_eval_coverage(record)
 		self._add_subset_macro_counts(record)
 		self._add_subset_samples(record)
@@ -251,9 +261,15 @@ class Aggregator:
 		if needs_review:
 			self._add_needs_review(record)
 
+	def add_pgml_blocks(self, *, record: dict, text: str) -> None:
+		if self._pgml_block_sampler is not None:
+			self._pgml_block_sampler.add(record=record, text=text)
+
 	def close(self) -> None:
 		if self._bucket_writers is not None:
 			self._bucket_writers.close()
+		if self._pgml_block_sampler is not None:
+			self._pgml_block_sampler.close()
 
 	def _add_cross_tabs(self, record: dict) -> None:
 		types = record.get("types", [])
@@ -279,7 +295,6 @@ class Aggregator:
 			eval_set = ["none"]
 
 		has_widgets = not (len(widget_set) == 1 and widget_set[0] == "none")
-		has_evals = not (len(eval_set) == 1 and eval_set[0] == "none")
 
 		for t in type_set:
 			for w in widget_set:
@@ -291,14 +306,56 @@ class Aggregator:
 			for e in eval_set:
 				self.widget_by_evaluator[(w, e)] = self.widget_by_evaluator.get((w, e), 0) + 1
 
-		if has_widgets and has_evals:
-			_inc(self.coverage, "widgets=some,evaluators=some")
-		elif has_widgets and (not has_evals):
-			_inc(self.coverage, "widgets=some,evaluators=none")
-		elif (not has_widgets) and has_evals:
-			_inc(self.coverage, "widgets=none,evaluators=some")
+		self._add_coverage(record, has_widgets=has_widgets)
+
+	def _add_coverage(self, record: dict, *, has_widgets: bool) -> None:
+		ans_call_count = int(record.get("ans_call_evaluator_count", 0) or 0)
+		pgml_payload_count = int(record.get("pgml_payload_evaluator_count", 0) or 0)
+
+		if ans_call_count > 0 and pgml_payload_count > 0:
+			eval_bucket = "both"
+		elif ans_call_count > 0:
+			eval_bucket = "ans_only"
+		elif pgml_payload_count > 0:
+			eval_bucket = "pgml_only"
 		else:
-			_inc(self.coverage, "widgets=none,evaluators=none")
+			eval_bucket = "none"
+
+		widget_bucket = "some" if has_widgets else "none"
+		_inc(self.coverage, f"widgets={widget_bucket},eval={eval_bucket}")
+
+	def _add_evaluator_sources(self, record: dict) -> None:
+		evaluator_sources = record.get("evaluator_sources", [])
+		if isinstance(evaluator_sources, list):
+			for s in evaluator_sources:
+				if isinstance(s, str) and s:
+					_inc(self.evaluator_source_counts, s)
+
+		pgml_kinds = record.get("pgml_payload_evaluator_kinds", [])
+		if isinstance(pgml_kinds, list):
+			for k in pgml_kinds:
+				if isinstance(k, str) and k:
+					_inc(self.pgml_payload_evaluator_counts, k)
+
+		types = record.get("types", [])
+		if not isinstance(types, list) or not types:
+			types = ["other"]
+
+		ans_call_count = int(record.get("ans_call_evaluator_count", 0) or 0)
+		pgml_payload_count = int(record.get("pgml_payload_evaluator_count", 0) or 0)
+
+		sources: list[str] = []
+		if ans_call_count > 0:
+			sources.append("ans_call")
+		if pgml_payload_count > 0:
+			sources.append("pgml_payload")
+		if not sources:
+			sources = ["none"]
+
+		type_set = sorted({t for t in types if isinstance(t, str) and t})
+		for t in type_set:
+			for s in sources:
+				self.type_by_evaluator_source[(t, s)] = self.type_by_evaluator_source.get((t, s), 0) + 1
 
 	def _add_other(self, record: dict) -> None:
 		bucket = other_bucket(record)
@@ -426,6 +483,9 @@ class Aggregator:
 		out["pgml_blank_marker_hist.tsv"] = _render_counts_tsv(list(self.pgml_blank_hist.items()), key_name="bucket")
 		out["ans_token_hist.tsv"] = _render_counts_tsv(list(self.ans_token_hist.items()), key_name="bucket")
 		out["evaluator_coverage_reasons.tsv"] = _render_counts_tsv(list(self.evaluator_coverage_reasons.items()), key_name="reason")
+		out["evaluator_source_counts.tsv"] = _render_counts_tsv(list(self.evaluator_source_counts.items()), key_name="source")
+		out["pgml_payload_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_payload_evaluator_counts.items()), key_name="evaluator_kind")
+		out["type_by_evaluator_source.tsv"] = self._render_pair_counts_tsv(self.type_by_evaluator_source, left="type", right="evaluator_source")
 		out["needs_review.tsv"] = self._render_needs_review_tsv()
 		out["needs_review_bucket_counts.tsv"] = _render_counts_tsv(list(self.needs_review_bucket_counts.items()), key_name="bucket")
 		out["needs_review_type_counts.tsv"] = _render_counts_tsv(list(self.needs_review_type_counts.items()), key_name="type")
@@ -767,3 +827,82 @@ class BucketWriters:
 			except Exception:
 				pass
 		self._handles.clear()
+
+
+#============================================
+
+
+class PgmlBlockSampler:
+	def __init__(self, out_dir: str, *, limit: int = 500, max_chars: int = 20000):
+		import os
+
+		self._limit = limit
+		self._max_chars = max_chars
+		self._count = 0
+
+		path = os.path.join(out_dir, "pgml_blocks_sample.txt")
+		self._fp = open(path, "w", encoding="utf-8")
+
+	def add(self, *, record: dict, text: str) -> None:
+		if self._count >= self._limit:
+			return
+
+		file_path = record.get("file", "")
+		if not isinstance(file_path, str) or not file_path:
+			return
+
+		types = record.get("types", [])
+		if not isinstance(types, list):
+			return
+
+		evaluator_kinds = record.get("evaluator_kinds", [])
+		has_evaluators = bool(isinstance(evaluator_kinds, list) and evaluator_kinds)
+
+		include = False
+		if "unknown_pgml_blank" in types:
+			include = True
+		if (not has_evaluators) and ("numeric_entry" in types):
+			include = True
+		if not include:
+			return
+
+		import pg_analyze.extract_evaluators
+		import pg_analyze.tokenize
+
+		newlines = pg_analyze.tokenize.build_newline_index(text)
+		blocks = pg_analyze.extract_evaluators.extract_pgml_blocks(text, newlines=newlines)
+		for b in blocks:
+			if self._count >= self._limit:
+				break
+			self._write_block(file_path=file_path, block=b)
+			self._count += 1
+
+	def _write_block(self, *, file_path: str, block: dict) -> None:
+		kind = block.get("kind", "")
+		start_line = int(block.get("start_line", 0) or 0)
+		blank_markers = int(block.get("blank_marker_count", 0) or 0)
+		has_payload = int(block.get("has_payload", 0) or 0)
+		block_text = block.get("text", "")
+		if not isinstance(kind, str):
+			kind = ""
+		if not isinstance(block_text, str):
+			block_text = ""
+
+		header = f"=== file={file_path} kind={kind} start_line={start_line} blank_markers={blank_markers} has_payload={has_payload} ===\n"
+		self._fp.write(header)
+
+		if len(block_text) > self._max_chars:
+			self._fp.write(block_text[: self._max_chars])
+			self._fp.write("\n[TRUNCATED]\n")
+		else:
+			self._fp.write(block_text)
+			if not block_text.endswith("\n"):
+				self._fp.write("\n")
+
+		self._fp.write("=== END ===\n\n")
+
+	def close(self) -> None:
+		try:
+			self._fp.close()
+		except Exception:
+			pass

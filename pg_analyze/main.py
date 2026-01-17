@@ -28,8 +28,10 @@ def main() -> None:
 
 	try:
 		for file_path in pg_files:
-			record = analyze_file(file_path)
+			text = _read_text_latin1(file_path)
+			record = analyze_text(text=text, file_path=file_path)
 			aggregator.add_record(record)
+			aggregator.add_pgml_blocks(record=record, text=text)
 		write_reports(args.out_dir, aggregator)
 	finally:
 		aggregator.close()
@@ -104,13 +106,17 @@ def analyze_file(file_path: str) -> dict:
 	return analyze_text(text=text, file_path=file_path)
 
 def analyze_text(*, text: str, file_path: str) -> dict:
-	clean = pg_analyze.tokenize.strip_heredocs(pg_analyze.tokenize.strip_comments(text))
+	comment_stripped = pg_analyze.tokenize.strip_comments(text)
+	clean = pg_analyze.tokenize.strip_heredocs(comment_stripped)
 	newlines = pg_analyze.tokenize.build_newline_index(clean)
+	raw_newlines = pg_analyze.tokenize.build_newline_index(text)
 
 	macros = pg_analyze.extract_evaluators.extract_macros(clean, newlines=newlines)
 	widgets, _pgml_info = pg_analyze.extract_widgets.extract(clean, newlines=newlines)
 	answers = pg_analyze.extract_answers.extract(clean, newlines=newlines)
-	evaluators = pg_analyze.extract_evaluators.extract(clean, newlines=newlines)
+	ans_evaluators = pg_analyze.extract_evaluators.extract(clean, newlines=newlines)
+	pgml_payload_evaluators = pg_analyze.extract_evaluators.extract_pgml_payload_evaluators(text, newlines=raw_newlines)
+	evaluators = ans_evaluators + pgml_payload_evaluators
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
 	has_multianswer = bool(_MULTIANSWER_RX.search(clean))
 	named_rule_refs = _extract_named_rule_refs(evaluators)
@@ -130,8 +136,9 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 
 	widget_kinds = [w.get("kind") for w in widgets if isinstance(w.get("kind"), str)]
 	evaluator_kinds = [e.get("kind") for e in evaluators if isinstance(e.get("kind"), str)]
+	evaluator_sources = [e.get("source") for e in evaluators if isinstance(e.get("source"), str)]
 	input_count = sum(1 for w in widgets if w.get("kind") in {"blank", "popup", "radio", "checkbox", "matching", "ordering"})
-	ans_count = len(evaluators)
+	ans_count = len(ans_evaluators)
 	wiring_empty = len(wiring) == 0
 	confidence = float(labels.get("confidence", 0.0))
 	types = labels.get("types", [])
@@ -155,6 +162,11 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 
 	has_answer_ctor = 1 if (len(answers) > 0 or bool(_CTOR_TOKEN_RX.search(clean))) else 0
 
+	ans_call_evaluator_count = len(ans_evaluators)
+	pgml_payload_evaluator_count = len(pgml_payload_evaluators)
+	ans_call_evaluator_kinds = [e.get("kind") for e in ans_evaluators if isinstance(e.get("kind"), str)]
+	pgml_payload_evaluator_kinds = [e.get("kind") for e in pgml_payload_evaluators if isinstance(e.get("kind"), str)]
+
 	record = {
 		"file": file_path,
 		"types": types,
@@ -163,6 +175,11 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"ans_count": ans_count,
 		"widget_kinds": widget_kinds,
 		"evaluator_kinds": evaluator_kinds,
+		"evaluator_sources": evaluator_sources,
+		"ans_call_evaluator_count": ans_call_evaluator_count,
+		"pgml_payload_evaluator_count": pgml_payload_evaluator_count,
+		"ans_call_evaluator_kinds": ans_call_evaluator_kinds,
+		"pgml_payload_evaluator_kinds": pgml_payload_evaluator_kinds,
 		"loadMacros": macros.get("loadMacros", []),
 		"reasons": reasons,
 		"wiring_empty": wiring_empty,

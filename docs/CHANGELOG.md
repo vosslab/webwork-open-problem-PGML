@@ -17,8 +17,11 @@
 - Pre-strip heredoc bodies before running extractors and record `named_ans_rule(...)` references from evaluator expressions.
 - Add aggregate-only "other" analysis reports (breakdown, restricted macro/widget/evaluator counts, PGML blank marker histograms, and small bounded samples) and label `unknown_pgml_blank` when PGML blanks exist but no evaluators/widgets are detected.
 - Add cross-tab aggregate reports (type x widget, type x evaluator, widget x evaluator) plus a `coverage.tsv` sanity table.
-- Ensure `coverage.tsv` always includes all four buckets (including zeros) and extend aggregation tests to cover the new cross-tab TSV outputs.
+- Ensure `coverage.tsv` always includes all buckets (including zeros) and extend aggregation tests to cover the cross-tab TSV outputs.
 - Make `needs_review.tsv` actionable by bucketing and stratifying samples, and add `needs_review_*_counts.tsv` summaries (bucket/type/macro).
 - Write curated bucket file lists under the output directory (`type/`, `widget/`, `evaluator/`) with one path per line for sampling/grepping without per-file JSON or TSV.
 - Improve detection of common PGchoicemacros-based widgets/evaluators and add explicit `graph_like` and `essay` labels to reduce the "other" bucket.
 - Add evaluator coverage instrumentation reports (`ans_token_hist.tsv`, `evaluator_coverage_reasons.tsv`) plus restricted macro counts and bounded samples to target missing evaluator detection in PGML-heavy files.
+- Extract evaluator payloads from PGML blanks (BEGIN/END blocks and PGML heredocs) and add evaluator-source reports (`evaluator_source_counts.tsv`, `pgml_payload_evaluator_counts.tsv`, `type_by_evaluator_source.tsv`) plus an updated `coverage.tsv` that distinguishes ANS vs PGML-derived evaluators.
+- Add a bounded diagnostic dump of raw PGML blocks for targeted buckets (`pgml_blocks_sample.txt`) to inspect PGML idioms without per-file output.
+- Ensure `pg_analyze` overwrites existing output files and keeps TSV outputs directly under `-o` (no additional report subfolders).
