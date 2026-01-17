@@ -41,3 +41,5 @@
 - Add [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md) to summarize the current `output/` corpus reports in a human-readable form.
 - Clarify the full-OPL vs PGML-corpus comparison in [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md), link it from `README.md`, and avoid hard-coding an `output/` directory name in [docs/CORPUS_CURATION.md](docs/CORPUS_CURATION.md).
 - Expand [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md) with macro/type highlights, selected cross-tab tables, and key histograms beyond the discipline breakdown.
+- Extend `pg_analyze` to report DBchapter/DBsection coverage and normalization, path provenance, randomization proxy counts, and exact duplicate counts, and document these comparison stats in [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md).
+- Add file-level `widget_kind` coverage counts (distinct per file) alongside widget instance counts, and use those to document widget surface-area differences between full OPL and this PGML corpus.

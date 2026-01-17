@@ -748,20 +748,20 @@ def _tsv_meta(name: str) -> dict[str, str]:
 		},
 		"discipline_subject_counts.tsv": {
 			"population": "all .pg files under roots (DBsubject lines only)",
-			"unit": "each DBsubject line contributes 1 to (discipline, subject_raw)",
-			"notes": "subject_raw is normalized (quotes stripped, trimmed, lowercased); top subjects per discipline only",
+			"unit": "each DBsubject line contributes 1 to (discipline, subject_raw, subject_norm)",
+			"notes": "subject_raw is quotes-stripped and trimmed; subject_norm is lowercased and whitespace-collapsed (with minimal typo fixups); top subjects per discipline only",
 			"sorted": "discipline order is fixed; within discipline count desc, then subject asc",
 		},
 		"discipline_coverage.tsv": {
 			"population": "all .pg files under roots",
-			"unit": "file and line coverage metrics for DBsubject",
-			"notes": "multi-subject files contribute multiple DBsubject lines; blanks are counted after normalization",
+			"unit": "file and line coverage metrics for DBsubject/DBchapter/DBsection",
+			"notes": "multi-subject files contribute multiple DBsubject lines; blanks are counted after quote-stripping and trimming; changed_by_normalization counts raw != normalized",
 			"sorted": "row order is fixed; do not sort",
 		},
 		"discipline_unclassified_subject_counts.tsv": {
 			"population": "DBsubject lines bucketed as other",
-			"unit": "each DBsubject line contributes 1 to its raw subject string",
-			"notes": "top unclassified subjects to drive taxonomy tuning; subject_raw is normalized",
+			"unit": "each DBsubject line contributes 1 to (subject_raw, subject_norm)",
+			"notes": "top unclassified subjects to drive taxonomy tuning; subject_raw preserves case/spacing and subject_norm is normalized",
 			"sorted": "count desc, then subject asc",
 		},
 		"discipline_samples.tsv": {
