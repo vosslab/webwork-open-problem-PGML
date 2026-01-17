@@ -70,8 +70,8 @@ def extract(stripped_text: str, *, newlines: list[int]) -> list[dict]:
 #============================================
 
 PGML_BLANK_RX = re.compile(r"\[[ \t]*_+[ \t]*\]")
-PGML_BLANK_WITH_PAYLOAD_RX = re.compile(r"\[[ \t]*_+[ \t]*\][ \t]*\{")
-PGML_BLANK_WITH_STAR_SPEC_RX = re.compile(r"\[[ \t]*_+[ \t]*\][ \t]*\*[ \t]*\{")
+PGML_BLANK_WITH_PAYLOAD_RX = re.compile(r"\[[ \t]*_+[ \t]*\]\s*\{")
+PGML_BLANK_WITH_STAR_SPEC_RX = re.compile(r"\[[ \t]*_+[ \t]*\]\s*\*\s*\{")
 
 
 def extract_pgml_payload_evaluators(text: str, *, newlines: list[int]) -> list[dict]:
@@ -343,7 +343,7 @@ def extract_pgml_blocks(text: str, *, newlines: list[int]) -> list[dict]:
 	- kind: BEGIN_PGML, BEGIN_PGML_HINT, BEGIN_PGML_SOLUTION, HEREDOC_PGML
 	- start_line: 1-based line
 	- blank_marker_count: number of [_] / [____] markers in the block
-	- has_payload: whether any blank appears with a {...} payload or a "*{...}" spec
+	- has_payload: whether any blank appears with a {...} payload
 	- text: the raw block text
 	"""
 	out: list[dict] = []
@@ -411,7 +411,7 @@ def _extract_pgml_heredoc_blocks(text: str, *, newlines: list[int]) -> list[dict
 
 def _pgml_block_info(block_text: str, *, start: int, kind: str, newlines: list[int], start_line: int | None = None) -> dict:
 	blank_marker_count = len(PGML_BLANK_RX.findall(block_text))
-	has_payload = 1 if bool(PGML_BLANK_WITH_PAYLOAD_RX.search(block_text) or PGML_BLANK_WITH_STAR_SPEC_RX.search(block_text)) else 0
+	has_payload = 1 if bool(PGML_BLANK_WITH_PAYLOAD_RX.search(block_text)) else 0
 	if start_line is None:
 		start_line = pg_analyze.tokenize.pos_to_line(newlines, start)
 	return {

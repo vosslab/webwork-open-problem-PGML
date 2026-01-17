@@ -19,6 +19,13 @@ import pg_analyze.wire_inputs
 
 #============================================
 
+_STAR_SPEC_SIMPLE_VAR_RX = re.compile(r"^\$([A-Za-z_]\w*)$")
+
+_ANSWERFORMATHELP_MATRICES_RX = re.compile(
+	r"""(?i)\bAnswerFormatHelp\s*\(\s*['"]matrices['"]\s*\)"""
+)
+
+
 def main() -> None:
 	start = time.perf_counter()
 	args = parse_args()
@@ -237,12 +244,16 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 	macros = pg_analyze.extract_evaluators.extract_macros(clean, newlines=newlines)
 	widgets, _pgml_info = pg_analyze.extract_widgets.extract(clean, newlines=newlines)
 	answers = pg_analyze.extract_answers.extract(clean, newlines=newlines)
+	symbol_table = pg_analyze.extract_answers.build_symbol_table(answers)
 	ans_evaluators = pg_analyze.extract_evaluators.extract(clean, newlines=newlines)
 	pgml_payload_evaluators, pgml_star_spec_evaluators = pg_analyze.extract_evaluators.extract_pgml_embedded_evaluators(text, newlines=raw_newlines)
+	_refine_star_spec_evaluators(pgml_star_spec_evaluators, symbol_table=symbol_table)
 	evaluators = ans_evaluators + pgml_payload_evaluators + pgml_star_spec_evaluators
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
 	has_multianswer = bool(_MULTIANSWER_RX.search(clean))
 	named_rule_refs = _extract_named_rule_refs(evaluators)
+
+	subtype_tags = _extract_subtype_tags_from_pgml(text)
 
 	report = {
 		"file": file_path,
@@ -253,6 +264,7 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"wiring": wiring,
 		"pgml": _pgml_info,
 		"has_multianswer": has_multianswer,
+		"subtype_tags": subtype_tags,
 	}
 
 	labels, _ = pg_analyze.classify.classify(report)
@@ -297,6 +309,7 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 	record = {
 		"file": file_path,
 		"types": types,
+		"subtype_tags": subtype_tags,
 		"confidence": confidence,
 		"input_count": input_count,
 		"ans_count": ans_count,
@@ -346,6 +359,76 @@ def _read_text_latin1(path: str) -> str:
 	with open(path, "r", encoding="latin-1") as f:
 		return f.read()
 
+
+#============================================
+
+
+def _refine_star_spec_evaluators(evaluators: list[dict], *, symbol_table: dict[str, str]) -> None:
+	"""
+	Refine pgml_star_spec evaluators into more useful kinds.
+
+	This is intentionally shallow:
+	- "*{$var}" becomes star_spec_indirect (or _numeric/_string when ctor is known)
+	- "*{expr}" becomes star_spec_expr
+	"""
+	for e in evaluators:
+		if not isinstance(e, dict):
+			continue
+		if e.get("source") != "pgml_star_spec":
+			continue
+
+		kind = e.get("kind")
+		if isinstance(kind, str) and kind and kind != "star_spec":
+			continue
+
+		expr = e.get("expr")
+		if not isinstance(expr, str):
+			continue
+		expr = expr.strip()
+		m = _STAR_SPEC_SIMPLE_VAR_RX.match(expr)
+		if m:
+			var = m.group(1)
+			ctor = symbol_table.get(var)
+			if ctor == "String":
+				e["kind"] = "star_spec_indirect_string"
+			elif ctor in {"Real", "Formula", "Compute", "List", "Vector", "Point"}:
+				e["kind"] = "star_spec_indirect_numeric"
+			else:
+				e["kind"] = "star_spec_indirect"
+			continue
+
+		if "$" in expr:
+			e["kind"] = "star_spec_expr"
+
+
+def _extract_subtype_tags_from_pgml(text: str) -> list[str]:
+	"""
+	Extract lightweight subtype tags from PGML regions only.
+	"""
+	tags: list[str] = []
+	if _pgml_has_matrices_help(text):
+		tags.append("matrix_entry")
+	return tags
+
+
+def _pgml_has_matrices_help(text: str) -> bool:
+	if not isinstance(text, str) or not text:
+		return False
+	newlines = pg_analyze.tokenize.build_newline_index(text)
+	blocks = pg_analyze.extract_evaluators.extract_pgml_blocks(text, newlines=newlines)
+	for b in blocks:
+		if not isinstance(b, dict):
+			continue
+		kind = b.get("kind", "")
+		if kind != "BEGIN_PGML":
+			continue
+		block_text = b.get("text", "")
+		if not isinstance(block_text, str):
+			continue
+		if _ANSWERFORMATHELP_MATRICES_RX.search(block_text):
+			return True
+	return False
+
 #============================================
 
 
@@ -379,11 +462,13 @@ def _write_index(out_dir: str) -> None:
 		"- samples/unknown_pgml_blank_signature_counts.tsv",
 		"- samples/other_signature_counts.tsv",
 		"- diagnostics/pgml_blocks_unknown_pgml_blank_top_signatures.txt",
+		"- counts/subtype_tag_counts_all_files.tsv",
 		"",
 		"Then:",
 		"- summary/evaluator_source_counts_all_files.tsv",
 		"- counts/evaluator_kind_counts_pgml_payload_only.tsv",
 		"- counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
+		"- counts/subtype_tag_counts_all_files.tsv",
 		"",
 		"Then:",
 		"- cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
@@ -460,6 +545,10 @@ def _tsv_meta(name: str) -> dict[str, str]:
 		"pgml_star_spec_evaluator_counts.tsv": {
 			"unit": "each detected PGML-star-spec evaluator occurrence contributes 1",
 			"notes": "only evaluators extracted from PGML blank '*{...}' specs",
+		},
+		"subtype_tag_counts.tsv": {
+			"unit": "each file contributes 1 to each subtype tag it matches",
+			"notes": "multi-label expansion; subtype tags are a lightweight secondary taxonomy",
 		},
 		"type_by_widget.tsv": {
 			"unit": "each file contributes once per (type, widget_kind) pair",

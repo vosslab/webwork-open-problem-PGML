@@ -49,10 +49,11 @@ import pg_analyze.main
 		),
 		(
 			"pgml_star_spec_bare_var_in_begin_end_block",
+			"$ans1 = Compute('x');\n"
 			"BEGIN_PGML\n"
 			"Answer: [____]*{$ans1}\n"
 			"END_PGML\n",
-			lambda r: ("pgml_star_spec" in r["evaluator_sources"] and r["pgml_star_spec_evaluator_count"] == 1),
+			lambda r: ("pgml_star_spec" in r["evaluator_sources"] and "star_spec_indirect_numeric" in r["evaluator_kinds"]),
 		),
 		(
 			"pgml_star_spec_cmp_in_begin_end_block",
@@ -60,6 +61,13 @@ import pg_analyze.main
 			"Answer: [_]*{Real(3)->cmp()}\n"
 			"END_PGML\n",
 			lambda r: ("cmp" in r["evaluator_kinds"] and r["pgml_star_spec_evaluator_count"] == 1),
+		),
+		(
+			"matrix_entry_subtype_from_answerformathelp",
+			"BEGIN_PGML\n"
+			"AnswerFormatHelp('matrices')\n"
+			"END_PGML\n",
+			lambda r: ("matrix_entry" in r.get("subtype_tags", [])),
 		),
 		(
 			"loadmacros_mixed_quotes_whitespace",

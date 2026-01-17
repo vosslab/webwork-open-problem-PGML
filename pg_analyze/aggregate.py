@@ -87,6 +87,7 @@ OUTPUT_PATHS: dict[str, str] = {
 	"evaluator_counts.tsv": "counts/evaluator_kind_counts_all_files.tsv",
 	"pgml_payload_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_payload_only.tsv",
 	"pgml_star_spec_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
+	"subtype_tag_counts.tsv": "counts/subtype_tag_counts_all_files.tsv",
 
 	# cross_tabs/
 	"type_by_widget.tsv": "cross_tabs/type_x_widget_kind_counts.tsv",
@@ -231,6 +232,7 @@ class Aggregator:
 		self.evaluator_source_counts: dict[str, int] = {}
 		self.pgml_payload_evaluator_counts: dict[str, int] = {}
 		self.pgml_star_spec_evaluator_counts: dict[str, int] = {}
+		self.subtype_tag_counts: dict[str, int] = {}
 		self.type_by_evaluator_source: dict[tuple[str, str], int] = {}
 
 		self.macro_counts_unknown_pgml_blank: dict[str, int] = {}
@@ -301,6 +303,7 @@ class Aggregator:
 			_inc(self.ans_token_hist, count_bucket(ans_token_count))
 
 		self._add_evaluator_sources(record)
+		self._add_subtypes(record)
 		self._add_eval_coverage(record)
 		self._add_subset_macro_counts(record)
 		self._add_signatures(record)
@@ -417,6 +420,14 @@ class Aggregator:
 		for t in type_set:
 			for s in sources:
 				self.type_by_evaluator_source[(t, s)] = self.type_by_evaluator_source.get((t, s), 0) + 1
+
+	def _add_subtypes(self, record: dict) -> None:
+		subtypes = record.get("subtype_tags", [])
+		if not isinstance(subtypes, list):
+			return
+		for t in subtypes:
+			if isinstance(t, str) and t:
+				_inc(self.subtype_tag_counts, t)
 
 	def _add_other(self, record: dict) -> None:
 		bucket = other_bucket(record)
@@ -547,6 +558,7 @@ class Aggregator:
 		out["evaluator_source_counts.tsv"] = _render_counts_tsv(list(self.evaluator_source_counts.items()), key_name="source")
 		out["pgml_payload_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_payload_evaluator_counts.items()), key_name="evaluator_kind")
 		out["pgml_star_spec_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_star_spec_evaluator_counts.items()), key_name="evaluator_kind")
+		out["subtype_tag_counts.tsv"] = _render_counts_tsv(list(self.subtype_tag_counts.items()), key_name="subtype_tag")
 		out["type_by_evaluator_source.tsv"] = self._render_pair_counts_tsv(self.type_by_evaluator_source, left="type", right="evaluator_source")
 		out["needs_review.tsv"] = self._render_needs_review_tsv()
 		out["needs_review_bucket_counts.tsv"] = _render_counts_tsv(list(self.needs_review_bucket_counts.items()), key_name="bucket")
@@ -707,7 +719,7 @@ class Aggregator:
 		load_macros = record.get("loadMacros", [])
 		macros_top3 = ",".join(_macros_top3(load_macros if isinstance(load_macros, list) else []))
 		pgml_blank_markers = int(record.get("pgml_blank_marker_count", 0) or 0)
-		has_payload = 1 if (int(record.get("pgml_payload_evaluator_count", 0) or 0) > 0 or int(record.get("pgml_star_spec_evaluator_count", 0) or 0) > 0) else 0
+		has_payload = 1 if int(record.get("pgml_payload_evaluator_count", 0) or 0) > 0 else 0
 		confidence = float(record.get("confidence", 0.0))
 
 		evaluator_sources = record.get("evaluator_sources", [])
@@ -935,6 +947,8 @@ def unknown_pgml_blank_signature(record: dict) -> str:
 		return "no_pgml_blank_markers"
 
 	if has_star_spec:
+		if int(record.get("pgml_payload_evaluator_count", 0) or 0) <= 0:
+			return "pgml_blank_star_spec_only"
 		return "pgml_blank_star_spec_present"
 
 	if (not has_payload) and has_named_ans_rule:
@@ -1020,6 +1034,7 @@ class BucketWriters:
 	def _ensure_dirs(self) -> None:
 		import os
 		os.makedirs(os.path.join(self._base, "type"), exist_ok=True)
+		os.makedirs(os.path.join(self._base, "subtype"), exist_ok=True)
 		os.makedirs(os.path.join(self._base, "widget"), exist_ok=True)
 		os.makedirs(os.path.join(self._base, "evaluator"), exist_ok=True)
 
@@ -1053,6 +1068,11 @@ class BucketWriters:
 
 		for t in sorted({x for x in types if isinstance(x, str) and x}):
 			self._get_handle("type", t).write(file_path + "\n")
+
+		subtypes = record.get("subtype_tags", [])
+		if isinstance(subtypes, list) and subtypes:
+			for st in sorted({x for x in subtypes if isinstance(x, str) and x}):
+				self._get_handle("subtype", st).write(file_path + "\n")
 
 		for w in sorted({x for x in widgets if isinstance(x, str) and x}):
 			self._get_handle("widget", w).write(file_path + "\n")

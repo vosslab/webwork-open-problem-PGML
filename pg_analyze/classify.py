@@ -106,9 +106,16 @@ def classify(report: dict) -> tuple[dict, bool]:
 		types.append("fib_word")
 		add_reason("evaluator_or_ctor", "string")
 
+	if eval_kind_counts.get("star_spec_indirect_string", 0) > 0:
+		if "fib_word" not in types:
+			types.append("fib_word")
+		add_reason("evaluator_or_ctor", "star_spec_string")
+
 	if (
 		eval_kind_counts.get("num_cmp", 0) > 0
 		or eval_kind_counts.get("formula_cmp", 0) > 0
+		or eval_kind_counts.get("star_spec_indirect_numeric", 0) > 0
+		or eval_kind_counts.get("star_spec_expr", 0) > 0
 		or ctor_counts.get("Real", 0) > 0
 		or ctor_counts.get("Formula", 0) > 0
 		or ctor_counts.get("Compute", 0) > 0

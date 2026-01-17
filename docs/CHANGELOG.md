@@ -29,3 +29,4 @@
 - Add a standard `#` comment header block to TSV outputs and rename select report filenames to emphasize population and unit (directories unchanged).
 - Replace ad-hoc samples with signature-based counts and stratified example lists for `unknown_pgml_blank` and `other`.
 - Treat PGML blank `*{...}` specs (for example `[____]*{$ans1}`) as grading signals (`source=pgml_star_spec`), add a PGML star-spec evaluator counts report, and cover it with regression tests.
+- Refine `pgml_star_spec` evaluator kinds into indirect and expression forms using a lightweight symbol table, add a `matrix_entry` subtype tag (with counts and bucket lists), and rename the dominant unknown signature to `pgml_blank_star_spec_only` when applicable.

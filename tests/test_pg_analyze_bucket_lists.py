@@ -11,6 +11,7 @@ def test_bucket_lists_write_paths_once_per_bucket(tmp_path: Path) -> None:
 		writers.write_record({
 			"file": "a.pg",
 			"types": ["numeric_entry"],
+			"subtype_tags": ["matrix_entry"],
 			"widget_kinds": ["blank", "blank"],
 			"evaluator_kinds": ["cmp"],
 		})
@@ -26,6 +27,7 @@ def test_bucket_lists_write_paths_once_per_bucket(tmp_path: Path) -> None:
 	assert (tmp_path / "lists" / "type" / "numeric_entry_files.txt").read_text(encoding="utf-8") == "a.pg\n"
 	assert (tmp_path / "lists" / "type" / "other_files.txt").read_text(encoding="utf-8") == "b.pg\n"
 	assert (tmp_path / "lists" / "type" / "multipart_files.txt").read_text(encoding="utf-8") == "b.pg\n"
+	assert (tmp_path / "lists" / "subtype" / "matrix_entry_files.txt").read_text(encoding="utf-8") == "a.pg\n"
 
 	assert (tmp_path / "lists" / "widget" / "blank_files.txt").read_text(encoding="utf-8") == "a.pg\n"
 	assert (tmp_path / "lists" / "widget" / "none_files.txt").read_text(encoding="utf-8") == "b.pg\n"
