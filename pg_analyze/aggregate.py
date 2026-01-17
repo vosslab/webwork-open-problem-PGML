@@ -72,35 +72,54 @@ def _render_counts_tsv(rows: list[tuple[str, int]], *, key_name: str) -> str:
 	return "\n".join(lines) + "\n"
 
 
+def _render_long_counts_tsv(rows: list[tuple[str, str, str, int]]) -> str:
+	"""
+	Render a long-format counts table.
+
+	Rows are (group, scope, key, count).
+	"""
+	lines: list[str] = ["group\tscope\tkey\tcount"]
+	rows_sorted = sorted(rows, key=lambda x: (x[0], x[1], -x[3], x[2]))
+	for group, scope, key, count in rows_sorted:
+		lines.append(f"{group}\t{scope}\t{key}\t{count}")
+	return "\n".join(lines) + "\n"
+
+
+def _render_long_cross_tabs_tsv(rows: list[tuple[str, str, str, str, int]]) -> str:
+	"""
+	Render a long-format cross-tab table.
+
+	Rows are (row_dim, col_dim, row, col, count).
+	"""
+	lines: list[str] = ["row_dim\tcol_dim\trow\tcol\tcount"]
+	rows_sorted = sorted(rows, key=lambda x: (x[0], x[1], -x[4], x[2], x[3]))
+	for row_dim, col_dim, row, col, count in rows_sorted:
+		lines.append(f"{row_dim}\t{col_dim}\t{row}\t{col}\t{count}")
+	return "\n".join(lines) + "\n"
+
+
+def _render_long_histograms_tsv(rows: list[tuple[str, str, int]]) -> str:
+	"""
+	Render a long-format histogram table.
+
+	Rows are (histogram, bin, count).
+	"""
+	lines: list[str] = ["histogram\tbin\tcount"]
+	rows_sorted = sorted(rows, key=lambda x: (x[0], -x[2], x[1]))
+	for hist_name, bin_name, count in rows_sorted:
+		lines.append(f"{hist_name}\t{bin_name}\t{count}")
+	return "\n".join(lines) + "\n"
+
+
 #============================================
 
 OUTPUT_PATHS: dict[str, str] = {
 	# summary/
-	"counts_by_type.tsv": "summary/type_counts_all_files.tsv",
-	"confidence_bins.tsv": "summary/confidence_bins.tsv",
+	"counts_all.tsv": "summary/counts_all.tsv",
+	"cross_tabs_all.tsv": "summary/cross_tabs_all.tsv",
+	"histograms_all.tsv": "summary/histograms_all.tsv",
+	"macro_counts_segmented.tsv": "summary/macro_counts_segmented.tsv",
 	"coverage.tsv": "summary/coverage_widgets_vs_evaluator_source.tsv",
-	"evaluator_source_counts.tsv": "summary/evaluator_source_counts_all_files.tsv",
-
-	# counts/
-	"macro_counts.tsv": "counts/macro_load_counts_all_files.tsv",
-	"widget_counts.tsv": "counts/widget_kind_counts_all_files.tsv",
-	"evaluator_counts.tsv": "counts/evaluator_kind_counts_all_files.tsv",
-	"pgml_payload_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_payload_only.tsv",
-	"pgml_star_spec_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
-	"subtype_tag_counts.tsv": "counts/subtype_tag_counts_all_files.tsv",
-
-	# cross_tabs/
-	"type_by_widget.tsv": "cross_tabs/type_x_widget_kind_counts.tsv",
-	"type_by_evaluator.tsv": "cross_tabs/type_x_evaluator_kind_counts.tsv",
-	"type_by_evaluator_source.tsv": "cross_tabs/type_x_evaluator_source_counts.tsv",
-	"widget_by_evaluator.tsv": "cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
-
-	# histograms/
-	"input_count_hist.tsv": "histograms/input_count_hist.tsv",
-	"ans_count_hist.tsv": "histograms/ans_count_hist.tsv",
-	"ans_token_hist.tsv": "histograms/ans_token_hist.tsv",
-	"pgml_blank_marker_hist.tsv": "histograms/pgml_blank_marker_hist.tsv",
-	"other_pgml_blank_hist.tsv": "histograms/other_pgml_blank_hist.tsv",
 
 	# needs_review/
 	"needs_review.tsv": "needs_review/needs_review_samples_topN.tsv",
@@ -108,12 +127,6 @@ OUTPUT_PATHS: dict[str, str] = {
 	"needs_review_type_counts.tsv": "needs_review/needs_review_type_counts.tsv",
 	"needs_review_macro_counts.tsv": "needs_review/needs_review_macro_counts.tsv",
 	"evaluator_coverage_reasons.tsv": "needs_review/evaluator_missing_reasons_counts.tsv",
-
-	# macros/
-	"macro_counts_other.tsv": "macros/macro_counts_other.tsv",
-	"macro_counts_unknown_pgml_blank.tsv": "macros/macro_counts_unknown_pgml_blank.tsv",
-	"macro_counts_eval_none_numeric_entry.tsv": "macros/macro_counts_eval_none_numeric_entry.tsv",
-	"macro_counts_eval_none_multiple_choice.tsv": "macros/macro_counts_eval_none_multiple_choice.tsv",
 
 	# other/
 	"other_breakdown.tsv": "other/other_breakdown.tsv",
@@ -545,36 +558,17 @@ class Aggregator:
 
 	def render_reports(self) -> dict[str, str]:
 		out: dict[str, str] = {}
-		out["counts_by_type.tsv"] = _render_counts_tsv(list(self.type_counts.items()), key_name="type")
-		out["confidence_bins.tsv"] = _render_counts_tsv(list(self.confidence_bins.items()), key_name="bin")
-		out["macro_counts.tsv"] = _render_counts_tsv(list(self.macro_counts.items()), key_name="macro")
-		out["widget_counts.tsv"] = _render_counts_tsv(list(self.widget_counts.items()), key_name="widget_kind")
-		out["evaluator_counts.tsv"] = _render_counts_tsv(list(self.evaluator_counts.items()), key_name="evaluator_kind")
-		out["input_count_hist.tsv"] = _render_counts_tsv(list(self.input_hist.items()), key_name="bucket")
-		out["ans_count_hist.tsv"] = _render_counts_tsv(list(self.ans_hist.items()), key_name="bucket")
-		out["pgml_blank_marker_hist.tsv"] = _render_counts_tsv(list(self.pgml_blank_hist.items()), key_name="bucket")
-		out["ans_token_hist.tsv"] = _render_counts_tsv(list(self.ans_token_hist.items()), key_name="bucket")
-		out["evaluator_coverage_reasons.tsv"] = _render_counts_tsv(list(self.evaluator_coverage_reasons.items()), key_name="reason")
-		out["evaluator_source_counts.tsv"] = _render_counts_tsv(list(self.evaluator_source_counts.items()), key_name="source")
-		out["pgml_payload_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_payload_evaluator_counts.items()), key_name="evaluator_kind")
-		out["pgml_star_spec_evaluator_counts.tsv"] = _render_counts_tsv(list(self.pgml_star_spec_evaluator_counts.items()), key_name="evaluator_kind")
-		out["subtype_tag_counts.tsv"] = _render_counts_tsv(list(self.subtype_tag_counts.items()), key_name="subtype_tag")
-		out["type_by_evaluator_source.tsv"] = self._render_pair_counts_tsv(self.type_by_evaluator_source, left="type", right="evaluator_source")
+		out["counts_all.tsv"] = self._render_counts_all_tsv()
+		out["cross_tabs_all.tsv"] = self._render_cross_tabs_all_tsv()
+		out["histograms_all.tsv"] = self._render_histograms_all_tsv()
+		out["macro_counts_segmented.tsv"] = self._render_macro_counts_segmented_tsv()
 		out["needs_review.tsv"] = self._render_needs_review_tsv()
 		out["needs_review_bucket_counts.tsv"] = _render_counts_tsv(list(self.needs_review_bucket_counts.items()), key_name="bucket")
 		out["needs_review_type_counts.tsv"] = _render_counts_tsv(list(self.needs_review_type_counts.items()), key_name="type")
 		out["needs_review_macro_counts.tsv"] = _render_counts_tsv(list(self.needs_review_macro_counts.items()), key_name="macro")
-		out["macro_counts_unknown_pgml_blank.tsv"] = _render_counts_tsv(list(self.macro_counts_unknown_pgml_blank.items()), key_name="macro")
-		out["macro_counts_eval_none_numeric_entry.tsv"] = _render_counts_tsv(list(self.macro_counts_eval_none_numeric_entry.items()), key_name="macro")
-		out["macro_counts_eval_none_multiple_choice.tsv"] = _render_counts_tsv(list(self.macro_counts_eval_none_multiple_choice.items()), key_name="macro")
 		out["other_breakdown.tsv"] = _render_counts_tsv(list(self.other_breakdown.items()), key_name="bucket")
-		out["macro_counts_other.tsv"] = _render_counts_tsv(list(self.macro_counts_other.items()), key_name="macro")
 		out["widget_counts_other.tsv"] = _render_counts_tsv(list(self.widget_counts_other.items()), key_name="widget_kind")
 		out["evaluator_counts_other.tsv"] = _render_counts_tsv(list(self.evaluator_counts_other.items()), key_name="evaluator_kind")
-		out["other_pgml_blank_hist.tsv"] = _render_counts_tsv(list(self.other_pgml_blank_hist.items()), key_name="bucket")
-		out["type_by_widget.tsv"] = self._render_pair_counts_tsv(self.type_by_widget, left="type", right="widget_kind")
-		out["type_by_evaluator.tsv"] = self._render_pair_counts_tsv(self.type_by_evaluator, left="type", right="evaluator_kind")
-		out["widget_by_evaluator.tsv"] = self._render_pair_counts_tsv(self.widget_by_evaluator, left="widget_kind", right="evaluator_kind")
 		out["coverage.tsv"] = _render_counts_tsv(list(self.coverage.items()), key_name="bucket")
 		out["unknown_pgml_blank_signature_counts.tsv"] = self._render_signature_counts_tsv(self.unknown_signature_counts, category="unknown_pgml_blank", top_n=25)
 		out["unknown_pgml_blank_signature_samples.tsv"] = self._render_signature_samples_tsv(
@@ -592,7 +586,54 @@ class Aggregator:
 			category="other",
 			total_cap=500,
 		)
+		out["evaluator_coverage_reasons.tsv"] = _render_counts_tsv(list(self.evaluator_coverage_reasons.items()), key_name="reason")
 		return out
+
+	def _render_counts_all_tsv(self) -> str:
+		rows: list[tuple[str, str, str, int]] = []
+
+		rows.extend([("evaluator_kind", "all", k, v) for k, v in self.evaluator_counts.items()])
+		rows.extend([("evaluator_kind", "pgml_payload_only", k, v) for k, v in self.pgml_payload_evaluator_counts.items()])
+		rows.extend([("evaluator_kind", "pgml_star_spec_only", k, v) for k, v in self.pgml_star_spec_evaluator_counts.items()])
+		rows.extend([("widget_kind", "all", k, v) for k, v in self.widget_counts.items()])
+		rows.extend([("macro_load", "all", k, v) for k, v in self.macro_counts.items()])
+		rows.extend([("type", "all", k, v) for k, v in self.type_counts.items()])
+		rows.extend([("evaluator_source", "all", k, v) for k, v in self.evaluator_source_counts.items()])
+		rows.extend([("subtype_tag", "all", k, v) for k, v in self.subtype_tag_counts.items()])
+
+		return _render_long_counts_tsv(rows)
+
+	def _render_cross_tabs_all_tsv(self) -> str:
+		rows: list[tuple[str, str, str, str, int]] = []
+		rows.extend([("type", "widget_kind", a, b, c) for (a, b), c in self.type_by_widget.items()])
+		rows.extend([("type", "evaluator_kind", a, b, c) for (a, b), c in self.type_by_evaluator.items()])
+		rows.extend([("type", "evaluator_source", a, b, c) for (a, b), c in self.type_by_evaluator_source.items()])
+		rows.extend([("widget_kind", "evaluator_kind", a, b, c) for (a, b), c in self.widget_by_evaluator.items()])
+		return _render_long_cross_tabs_tsv(rows)
+
+	def _render_histograms_all_tsv(self) -> str:
+		rows: list[tuple[str, str, int]] = []
+		rows.extend([("input_count", k, v) for k, v in self.input_hist.items()])
+		rows.extend([("ans_count", k, v) for k, v in self.ans_hist.items()])
+		rows.extend([("pgml_blank_marker_count", k, v) for k, v in self.pgml_blank_hist.items()])
+		rows.extend([("ans_token_count", k, v) for k, v in self.ans_token_hist.items()])
+		rows.extend([("confidence_bin", k, v) for k, v in self.confidence_bins.items()])
+		rows.extend([("other_pgml_blank_marker_count", k, v) for k, v in self.other_pgml_blank_hist.items()])
+		return _render_long_histograms_tsv(rows)
+
+	def _render_macro_counts_segmented_tsv(self) -> str:
+		lines: list[str] = ["segment\tmacro\tcount"]
+		rows: list[tuple[str, str, int]] = []
+		rows.extend([("all", m, c) for m, c in self.macro_counts.items()])
+		rows.extend([("unknown_pgml_blank", m, c) for m, c in self.macro_counts_unknown_pgml_blank.items()])
+		rows.extend([("eval_none_numeric_entry", m, c) for m, c in self.macro_counts_eval_none_numeric_entry.items()])
+		rows.extend([("eval_none_multiple_choice", m, c) for m, c in self.macro_counts_eval_none_multiple_choice.items()])
+		rows.extend([("other", m, c) for m, c in self.macro_counts_other.items()])
+
+		rows_sorted = sorted(rows, key=lambda x: (x[0], -x[2], x[1]))
+		for segment, macro, count in rows_sorted:
+			lines.append(f"{segment}\t{macro}\t{count}")
+		return "\n".join(lines) + "\n"
 
 	def _render_signature_counts_tsv(self, counts: dict[str, int], *, category: str, top_n: int) -> str:
 		total = sum(counts.values())

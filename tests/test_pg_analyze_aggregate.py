@@ -4,7 +4,7 @@ import pg_analyze.aggregate
 import pg_analyze.main
 
 
-def _parse_counts_tsv(tsv_text: str) -> dict[str, int]:
+def _parse_simple_counts_tsv(tsv_text: str) -> dict[str, int]:
 	lines = [l for l in tsv_text.splitlines() if l.strip()]
 	assert lines
 	assert "\t" in lines[0]
@@ -12,6 +12,50 @@ def _parse_counts_tsv(tsv_text: str) -> dict[str, int]:
 	for line in lines[1:]:
 		key, count_text = line.split("\t", 1)
 		out[key] = int(count_text)
+	return out
+
+
+def _parse_counts_all_tsv(tsv_text: str) -> dict[tuple[str, str, str], int]:
+	lines = [l for l in tsv_text.splitlines() if l.strip()]
+	assert lines
+	assert lines[0] == "group\tscope\tkey\tcount"
+	out: dict[tuple[str, str, str], int] = {}
+	for line in lines[1:]:
+		group, scope, key, count_text = line.split("\t")
+		out[(group, scope, key)] = int(count_text)
+	return out
+
+
+def _parse_histograms_all_tsv(tsv_text: str) -> dict[tuple[str, str], int]:
+	lines = [l for l in tsv_text.splitlines() if l.strip()]
+	assert lines
+	assert lines[0] == "histogram\tbin\tcount"
+	out: dict[tuple[str, str], int] = {}
+	for line in lines[1:]:
+		hist_name, bin_name, count_text = line.split("\t")
+		out[(hist_name, bin_name)] = int(count_text)
+	return out
+
+
+def _parse_cross_tabs_all_tsv(tsv_text: str) -> dict[tuple[str, str, str, str], int]:
+	lines = [l for l in tsv_text.splitlines() if l.strip()]
+	assert lines
+	assert lines[0] == "row_dim\tcol_dim\trow\tcol\tcount"
+	out: dict[tuple[str, str, str, str], int] = {}
+	for line in lines[1:]:
+		row_dim, col_dim, row, col, count_text = line.split("\t")
+		out[(row_dim, col_dim, row, col)] = int(count_text)
+	return out
+
+
+def _parse_macro_counts_segmented_tsv(tsv_text: str) -> dict[tuple[str, str], int]:
+	lines = [l for l in tsv_text.splitlines() if l.strip()]
+	assert lines
+	assert lines[0] == "segment\tmacro\tcount"
+	out: dict[tuple[str, str], int] = {}
+	for line in lines[1:]:
+		segment, macro, count_text = line.split("\t")
+		out[(segment, macro)] = int(count_text)
 	return out
 
 
@@ -61,39 +105,34 @@ def test_aggregate_reports_from_synthetic_pg_like_strings() -> None:
 
 	reports = aggregator.render_reports()
 
-	type_counts = _parse_counts_tsv(reports["counts_by_type.tsv"])
-	assert type_counts["numeric_entry"] == 2
-	assert type_counts["multiple_choice"] == 1
-	assert type_counts["multipart"] == 1
-	assert type_counts["other"] == 1
-	assert type_counts["unknown_pgml_blank"] == 1
+	counts_all = _parse_counts_all_tsv(reports["counts_all.tsv"])
+	assert counts_all[("type", "all", "numeric_entry")] == 2
+	assert counts_all[("type", "all", "multiple_choice")] == 1
+	assert counts_all[("type", "all", "multipart")] == 1
+	assert counts_all[("type", "all", "other")] == 1
+	assert counts_all[("type", "all", "unknown_pgml_blank")] == 1
 
-	conf_bins = _parse_counts_tsv(reports["confidence_bins.tsv"])
-	assert conf_bins["0.5-0.6"] == 2
-	assert conf_bins["0.7-0.8"] == 1
+	hists_all = _parse_histograms_all_tsv(reports["histograms_all.tsv"])
+	assert hists_all[("confidence_bin", "0.5-0.6")] == 2
+	assert hists_all[("confidence_bin", "0.7-0.8")] == 1
 
-	macro_counts = _parse_counts_tsv(reports["macro_counts.tsv"])
-	assert macro_counts["PGstandard.pl"] == 3
-	assert macro_counts["MathObjects.pl"] == 2
-	assert macro_counts["parserRadioButtons.pl"] == 1
-	assert macro_counts["AppletObjects.pl"] == 1
+	assert counts_all[("macro_load", "all", "PGstandard.pl")] == 3
+	assert counts_all[("macro_load", "all", "MathObjects.pl")] == 2
+	assert counts_all[("macro_load", "all", "parserRadioButtons.pl")] == 1
+	assert counts_all[("macro_load", "all", "AppletObjects.pl")] == 1
 
-	widget_counts = _parse_counts_tsv(reports["widget_counts.tsv"])
-	assert widget_counts["blank"] == 3
-	assert widget_counts["radio"] == 1
+	assert counts_all[("widget_kind", "all", "blank")] == 3
+	assert counts_all[("widget_kind", "all", "radio")] == 1
 
-	eval_counts = _parse_counts_tsv(reports["evaluator_counts.tsv"])
-	assert eval_counts["cmp"] == 4
+	assert counts_all[("evaluator_kind", "all", "cmp")] == 4
 
-	input_hist = _parse_counts_tsv(reports["input_count_hist.tsv"])
-	assert input_hist["1"] == 3
-	assert input_hist["2"] == 1
-	assert input_hist["0"] == 1
+	assert hists_all[("input_count", "1")] == 3
+	assert hists_all[("input_count", "2")] == 1
+	assert hists_all[("input_count", "0")] == 1
 
-	ans_hist = _parse_counts_tsv(reports["ans_count_hist.tsv"])
-	assert ans_hist["1"] == 2
-	assert ans_hist["2"] == 1
-	assert ans_hist["0"] == 2
+	assert hists_all[("ans_count", "1")] == 2
+	assert hists_all[("ans_count", "2")] == 1
+	assert hists_all[("ans_count", "0")] == 2
 
 	needs_review_lines = [l for l in reports["needs_review.tsv"].splitlines() if l.strip()]
 	assert needs_review_lines[0].startswith("file\tconfidence\tbucket\t")
@@ -102,44 +141,36 @@ def test_aggregate_reports_from_synthetic_pg_like_strings() -> None:
 	assert any(l.startswith("e.pg\t0.25\twidget_no_evaluator\t") for l in needs_review_lines[1:])
 	assert any(l.startswith("a.pg\t0.50\tlow_confidence_misc\t") for l in needs_review_lines[1:])
 
-	needs_review_bucket_counts = _parse_counts_tsv(reports["needs_review_bucket_counts.tsv"])
+	needs_review_bucket_counts = _parse_simple_counts_tsv(reports["needs_review_bucket_counts.tsv"])
 	assert needs_review_bucket_counts["coverage_no_signals"] == 1
 	assert needs_review_bucket_counts["widget_no_evaluator"] == 1
 	assert needs_review_bucket_counts["low_confidence_misc"] == 1
 
-	needs_review_type_counts = _parse_counts_tsv(reports["needs_review_type_counts.tsv"])
+	needs_review_type_counts = _parse_simple_counts_tsv(reports["needs_review_type_counts.tsv"])
 	assert needs_review_type_counts["numeric_entry"] == 1
 	assert needs_review_type_counts["other"] == 1
 	assert needs_review_type_counts["unknown_pgml_blank"] == 1
 
-	needs_review_macro_counts = _parse_counts_tsv(reports["needs_review_macro_counts.tsv"])
+	needs_review_macro_counts = _parse_simple_counts_tsv(reports["needs_review_macro_counts.tsv"])
 	assert needs_review_macro_counts["PGstandard.pl"] == 1
 	assert needs_review_macro_counts["MathObjects.pl"] == 1
 	assert needs_review_macro_counts["AppletObjects.pl"] == 1
 
-	other_breakdown = _parse_counts_tsv(reports["other_breakdown.tsv"])
+	other_breakdown = _parse_simple_counts_tsv(reports["other_breakdown.tsv"])
 	assert other_breakdown["other_applet_like"] == 1
 
-	macro_counts_other = _parse_counts_tsv(reports["macro_counts_other.tsv"])
-	assert macro_counts_other["AppletObjects.pl"] == 1
+	macro_counts_segmented = _parse_macro_counts_segmented_tsv(reports["macro_counts_segmented.tsv"])
+	assert macro_counts_segmented[("other", "AppletObjects.pl")] == 1
 
-	pgml_blank_hist = _parse_counts_tsv(reports["pgml_blank_marker_hist.tsv"])
-	assert pgml_blank_hist["0"] == 4
-	assert pgml_blank_hist["1"] == 1
+	assert hists_all[("pgml_blank_marker_count", "0")] == 4
+	assert hists_all[("pgml_blank_marker_count", "1")] == 1
 
-	type_by_widget_lines = [l for l in reports["type_by_widget.tsv"].splitlines() if l.strip()]
-	assert type_by_widget_lines[0] == "type\twidget_kind\tcount"
-	assert any(l.startswith("other\tnone\t1") for l in type_by_widget_lines[1:])
+	cross_tabs_all = _parse_cross_tabs_all_tsv(reports["cross_tabs_all.tsv"])
+	assert cross_tabs_all[("type", "widget_kind", "other", "none")] == 1
+	assert cross_tabs_all[("type", "evaluator_kind", "other", "none")] == 1
+	assert cross_tabs_all[("widget_kind", "evaluator_kind", "radio", "cmp")] == 1
 
-	type_by_evaluator_lines = [l for l in reports["type_by_evaluator.tsv"].splitlines() if l.strip()]
-	assert type_by_evaluator_lines[0] == "type\tevaluator_kind\tcount"
-	assert any(l.startswith("other\tnone\t1") for l in type_by_evaluator_lines[1:])
-
-	widget_by_evaluator_lines = [l for l in reports["widget_by_evaluator.tsv"].splitlines() if l.strip()]
-	assert widget_by_evaluator_lines[0] == "widget_kind\tevaluator_kind\tcount"
-	assert any(l.startswith("radio\tcmp\t1") for l in widget_by_evaluator_lines[1:])
-
-	coverage = _parse_counts_tsv(reports["coverage.tsv"])
+	coverage = _parse_simple_counts_tsv(reports["coverage.tsv"])
 	assert coverage["widgets=some,eval=ans_only"] == 3
 	assert coverage["widgets=some,eval=none"] == 1
 	assert coverage["widgets=none,eval=none"] == 1

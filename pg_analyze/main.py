@@ -433,6 +433,9 @@ def _pgml_has_matrices_help(text: str) -> bool:
 
 
 def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> None:
+	_remove_obsolete_outputs(out_dir)
+	_remove_ds_store(out_dir)
+
 	reports = aggregator.render_reports()
 	for filename, content in reports.items():
 		rel_path = pg_analyze.aggregate.OUTPUT_PATHS.get(filename, os.path.join("summary", filename))
@@ -446,6 +449,73 @@ def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> 
 			f.write(content)
 
 	_write_index(out_dir)
+	_remove_empty_output_dirs(out_dir)
+
+
+def _remove_obsolete_outputs(out_dir: str) -> None:
+	paths = [
+		# old per-topic stats outputs (replaced by summary/*.tsv masters)
+		"summary/type_counts_all_files.tsv",
+		"summary/confidence_bins.tsv",
+		"summary/evaluator_source_counts_all_files.tsv",
+
+		"counts/macro_load_counts_all_files.tsv",
+		"counts/widget_kind_counts_all_files.tsv",
+		"counts/evaluator_kind_counts_all_files.tsv",
+		"counts/evaluator_kind_counts_pgml_payload_only.tsv",
+		"counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
+		"counts/subtype_tag_counts_all_files.tsv",
+
+		"cross_tabs/type_x_widget_kind_counts.tsv",
+		"cross_tabs/type_x_evaluator_kind_counts.tsv",
+		"cross_tabs/type_x_evaluator_source_counts.tsv",
+		"cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
+
+		"histograms/input_count_hist.tsv",
+		"histograms/ans_count_hist.tsv",
+		"histograms/ans_token_hist.tsv",
+		"histograms/pgml_blank_marker_hist.tsv",
+		"histograms/other_pgml_blank_hist.tsv",
+
+		"macros/macro_counts_other.tsv",
+		"macros/macro_counts_unknown_pgml_blank.tsv",
+		"macros/macro_counts_eval_none_numeric_entry.tsv",
+		"macros/macro_counts_eval_none_multiple_choice.tsv",
+	]
+
+	for rel in paths:
+		path = os.path.join(out_dir, rel)
+		try:
+			os.remove(path)
+		except OSError:
+			pass
+
+
+def _remove_empty_output_dirs(out_dir: str) -> None:
+	paths = [
+		"counts",
+		"cross_tabs",
+		"histograms",
+		"macros",
+	]
+	for rel in paths:
+		path = os.path.join(out_dir, rel)
+		try:
+			if os.path.isdir(path) and not os.listdir(path):
+				os.rmdir(path)
+		except OSError:
+			pass
+
+
+def _remove_ds_store(out_dir: str) -> None:
+	for dirpath, _dirnames, filenames in os.walk(out_dir):
+		if ".DS_Store" not in filenames:
+			continue
+		path = os.path.join(dirpath, ".DS_Store")
+		try:
+			os.remove(path)
+		except OSError:
+			pass
 
 
 def _write_index(out_dir: str) -> None:
@@ -455,27 +525,23 @@ def _write_index(out_dir: str) -> None:
 		"",
 		"Start here:",
 		"- summary/coverage_widgets_vs_evaluator_source.tsv",
-		"- summary/type_counts_all_files.tsv",
+		"- summary/counts_all.tsv",
+		"- summary/cross_tabs_all.tsv",
+		"- summary/histograms_all.tsv",
 		"- needs_review/needs_review_bucket_counts.tsv",
 		"",
 		"Unknown/other categorization:",
 		"- samples/unknown_pgml_blank_signature_counts.tsv",
 		"- samples/other_signature_counts.tsv",
 		"- diagnostics/pgml_blocks_unknown_pgml_blank_top_signatures.txt",
-		"- counts/subtype_tag_counts_all_files.tsv",
+		"- summary/macro_counts_segmented.tsv",
 		"",
 		"Then:",
-		"- summary/evaluator_source_counts_all_files.tsv",
-		"- counts/evaluator_kind_counts_pgml_payload_only.tsv",
-		"- counts/evaluator_kind_counts_pgml_star_spec_only.tsv",
-		"- counts/subtype_tag_counts_all_files.tsv",
-		"",
-		"Then:",
-		"- cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
-		"- cross_tabs/type_x_evaluator_source_counts.tsv",
+		"- other/other_breakdown.tsv",
+		"- other/widget_counts_other.tsv",
+		"- other/evaluator_counts_other.tsv",
 		"",
 		"For tuning:",
-		"- macros/macro_counts_unknown_pgml_blank.tsv",
 		"- needs_review/evaluator_missing_reasons_counts.tsv",
 		"",
 		"For examples:",
@@ -510,13 +576,25 @@ def _tsv_meta(name: str) -> dict[str, str]:
 	}
 
 	table: dict[str, dict[str, str]] = {
-		"counts_by_type.tsv": {
-			"unit": "each file contributes 1 to each type label it matches",
-			"notes": "multi-label expansion; a file may increment multiple types",
+		"counts_all.tsv": {
+			"unit": "each row is a (group, scope, key) count",
+			"notes": "group and scope define the population; key is the item being counted",
+			"sorted": "group asc, scope asc, count desc, key asc",
 		},
-		"confidence_bins.tsv": {
-			"unit": "each file contributes to exactly one confidence bin",
-			"notes": "bins are 0.0-0.1 .. 0.9-1.0 based on confidence",
+		"cross_tabs_all.tsv": {
+			"unit": "each row is a (row_dim, col_dim, row, col) count",
+			"notes": "cross-tabs expand multi-labels; 'none' is used when nothing detected",
+			"sorted": "row_dim asc, col_dim asc, count desc, row asc, col asc",
+		},
+		"histograms_all.tsv": {
+			"unit": "each row is a (histogram, bin) count",
+			"notes": "includes confidence_bin, input_count, ans_count, ans_token_count, and PGML blank marker histograms",
+			"sorted": "histogram asc, count desc, bin asc",
+		},
+		"macro_counts_segmented.tsv": {
+			"unit": "each row is a (segment, macro) count",
+			"notes": "segment restricts the population (e.g. unknown_pgml_blank, eval_none_numeric_entry)",
+			"sorted": "segment asc, count desc, macro asc",
 		},
 		"coverage.tsv": {
 			"unit": "each file contributes to exactly one bucket",

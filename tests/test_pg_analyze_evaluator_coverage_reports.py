@@ -46,11 +46,9 @@ def test_evaluator_coverage_reports_and_restricted_macro_counts() -> None:
 	assert "none_pgml_blank_only\t1" in eval_cov
 	assert "none_but_cmp_present\t1" in eval_cov
 
-	m_unknown = reports["macro_counts_unknown_pgml_blank.tsv"]
-	assert "PGML.pl\t1" in m_unknown
-
-	m_num = reports["macro_counts_eval_none_numeric_entry.tsv"]
-	assert "MathObjects.pl\t1" in m_num
+	m_seg = reports["macro_counts_segmented.tsv"]
+	assert "unknown_pgml_blank\tPGML.pl\t1" in m_seg
+	assert "eval_none_numeric_entry\tMathObjects.pl\t1" in m_seg
 
 	sig_counts = reports["unknown_pgml_blank_signature_counts.tsv"]
 	assert "pgml_blank_no_grading_signals\t1\t" in sig_counts
