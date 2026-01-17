@@ -74,24 +74,24 @@ def _render_counts_tsv(rows: list[tuple[str, int]], *, key_name: str) -> str:
 
 #============================================
 
-REPORT_PATHS: dict[str, str] = {
+OUTPUT_PATHS: dict[str, str] = {
 	# summary/
-	"counts_by_type.tsv": "summary/counts_by_type.tsv",
+	"counts_by_type.tsv": "summary/type_counts_all_files.tsv",
 	"confidence_bins.tsv": "summary/confidence_bins.tsv",
-	"coverage.tsv": "summary/coverage.tsv",
-	"evaluator_source_counts.tsv": "summary/evaluator_source_counts.tsv",
+	"coverage.tsv": "summary/coverage_widgets_vs_evaluator_source.tsv",
+	"evaluator_source_counts.tsv": "summary/evaluator_source_counts_all_files.tsv",
 
 	# counts/
-	"macro_counts.tsv": "counts/macro_counts.tsv",
-	"widget_counts.tsv": "counts/widget_counts.tsv",
-	"evaluator_counts.tsv": "counts/evaluator_counts.tsv",
-	"pgml_payload_evaluator_counts.tsv": "counts/pgml_payload_evaluator_counts.tsv",
+	"macro_counts.tsv": "counts/macro_load_counts_all_files.tsv",
+	"widget_counts.tsv": "counts/widget_kind_counts_all_files.tsv",
+	"evaluator_counts.tsv": "counts/evaluator_kind_counts_all_files.tsv",
+	"pgml_payload_evaluator_counts.tsv": "counts/evaluator_kind_counts_pgml_payload_only.tsv",
 
 	# cross_tabs/
-	"type_by_widget.tsv": "cross_tabs/type_by_widget.tsv",
-	"type_by_evaluator.tsv": "cross_tabs/type_by_evaluator.tsv",
-	"type_by_evaluator_source.tsv": "cross_tabs/type_by_evaluator_source.tsv",
-	"widget_by_evaluator.tsv": "cross_tabs/widget_by_evaluator.tsv",
+	"type_by_widget.tsv": "cross_tabs/type_x_widget_kind_counts.tsv",
+	"type_by_evaluator.tsv": "cross_tabs/type_x_evaluator_kind_counts.tsv",
+	"type_by_evaluator_source.tsv": "cross_tabs/type_x_evaluator_source_counts.tsv",
+	"widget_by_evaluator.tsv": "cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
 
 	# histograms/
 	"input_count_hist.tsv": "histograms/input_count_hist.tsv",
@@ -101,11 +101,11 @@ REPORT_PATHS: dict[str, str] = {
 	"other_pgml_blank_hist.tsv": "histograms/other_pgml_blank_hist.tsv",
 
 	# needs_review/
-	"needs_review.tsv": "needs_review/needs_review.tsv",
+	"needs_review.tsv": "needs_review/needs_review_samples_topN.tsv",
 	"needs_review_bucket_counts.tsv": "needs_review/needs_review_bucket_counts.tsv",
 	"needs_review_type_counts.tsv": "needs_review/needs_review_type_counts.tsv",
 	"needs_review_macro_counts.tsv": "needs_review/needs_review_macro_counts.tsv",
-	"evaluator_coverage_reasons.tsv": "needs_review/evaluator_coverage_reasons.tsv",
+	"evaluator_coverage_reasons.tsv": "needs_review/evaluator_missing_reasons_counts.tsv",
 
 	# macros/
 	"macro_counts_other.tsv": "macros/macro_counts_other.tsv",
@@ -892,7 +892,7 @@ class PgmlBlockSampler:
 		self._max_chars = max_chars
 		self._count = 0
 
-		path = os.path.join(out_dir, "diagnostics", "pgml_blocks_sample.txt")
+		path = os.path.join(out_dir, "diagnostics", "pgml_blocks_samples_unknown_or_eval_missing.txt")
 		os.makedirs(os.path.dirname(path), exist_ok=True)
 		self._fp = open(path, "w", encoding="utf-8")
 

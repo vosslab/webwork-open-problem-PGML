@@ -250,11 +250,13 @@ def _read_text_latin1(path: str) -> str:
 def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> None:
 	reports = aggregator.render_reports()
 	for filename, content in reports.items():
-		rel_path = pg_analyze.aggregate.REPORT_PATHS.get(filename, os.path.join("summary", filename))
+		rel_path = pg_analyze.aggregate.OUTPUT_PATHS.get(filename, os.path.join("summary", filename))
 		path = os.path.join(out_dir, rel_path)
 		parent = os.path.dirname(path)
 		if parent:
 			os.makedirs(parent, exist_ok=True)
+		if filename.endswith(".tsv"):
+			content = _tsv_with_header(filename, content)
 		with open(path, "w", encoding="utf-8") as f:
 			f.write(content)
 
@@ -264,26 +266,27 @@ def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> 
 def _write_index(out_dir: str) -> None:
 	lines = [
 		"pg_analyze output index",
+		"Note: TSV files start with '#' comment headers.",
 		"",
 		"Start here:",
-		"- summary/coverage.tsv",
-		"- summary/counts_by_type.tsv",
+		"- summary/coverage_widgets_vs_evaluator_source.tsv",
+		"- summary/type_counts_all_files.tsv",
 		"- needs_review/needs_review_bucket_counts.tsv",
 		"",
 		"Then:",
-		"- summary/evaluator_source_counts.tsv",
-		"- counts/pgml_payload_evaluator_counts.tsv",
+		"- summary/evaluator_source_counts_all_files.tsv",
+		"- counts/evaluator_kind_counts_pgml_payload_only.tsv",
 		"",
 		"Then:",
-		"- cross_tabs/widget_by_evaluator.tsv",
-		"- cross_tabs/type_by_evaluator_source.tsv",
+		"- cross_tabs/widget_kind_x_evaluator_kind_counts.tsv",
+		"- cross_tabs/type_x_evaluator_source_counts.tsv",
 		"",
 		"For tuning:",
 		"- macros/macro_counts_unknown_pgml_blank.tsv",
-		"- needs_review/evaluator_coverage_reasons.tsv",
+		"- needs_review/evaluator_missing_reasons_counts.tsv",
 		"",
 		"For examples:",
-		"- diagnostics/pgml_blocks_sample.txt",
+		"- diagnostics/pgml_blocks_samples_unknown_or_eval_missing.txt",
 		"- samples/*.tsv",
 		"",
 	]
@@ -291,6 +294,182 @@ def _write_index(out_dir: str) -> None:
 	path = os.path.join(out_dir, "INDEX.txt")
 	with open(path, "w", encoding="utf-8") as f:
 		f.write("\n".join(lines))
+
+
+def _tsv_with_header(name: str, content: str) -> str:
+	meta = _tsv_meta(name)
+	lines: list[str] = [
+		f"# Population: {meta['population']}",
+		f"# Unit: {meta['unit']}",
+		f"# Notes: {meta['notes']}",
+		f"# Sorted: {meta['sorted']}",
+		"# ----",
+	]
+	return "\n".join(lines) + "\n" + content
+
+
+def _tsv_meta(name: str) -> dict[str, str]:
+	default = {
+		"population": "all .pg files under roots",
+		"unit": "one row aggregates multiple files",
+		"notes": "see column headers",
+		"sorted": "count desc, then keys asc",
+	}
+
+	table: dict[str, dict[str, str]] = {
+		"counts_by_type.tsv": {
+			"unit": "each file contributes 1 to each type label it matches",
+			"notes": "multi-label expansion; a file may increment multiple types",
+		},
+		"confidence_bins.tsv": {
+			"unit": "each file contributes to exactly one confidence bin",
+			"notes": "bins are 0.0-0.1 .. 0.9-1.0 based on confidence",
+		},
+		"coverage.tsv": {
+			"unit": "each file contributes to exactly one bucket",
+			"notes": "widgets=some means any widget detected; eval=ans_only/pgml_only/both/none based on evaluator source",
+		},
+		"evaluator_source_counts.tsv": {
+			"unit": "each evaluator occurrence contributes to its source",
+			"notes": "sources are ans_call and pgml_payload",
+		},
+		"macro_counts.tsv": {
+			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
+			"notes": "counts macro file names ending in .pl/.pg",
+		},
+		"widget_counts.tsv": {
+			"unit": "each detected widget occurrence contributes 1",
+			"notes": "includes repeated pgml_blank occurrences based on PGML blank markers",
+		},
+		"evaluator_counts.tsv": {
+			"unit": "each detected evaluator occurrence contributes 1",
+			"notes": "includes evaluators from ANS(...) and PGML blank payloads",
+		},
+		"pgml_payload_evaluator_counts.tsv": {
+			"unit": "each detected PGML-payload evaluator occurrence contributes 1",
+			"notes": "only evaluators extracted from PGML blank payloads",
+		},
+		"type_by_widget.tsv": {
+			"unit": "each file contributes once per (type, widget_kind) pair",
+			"notes": "multi-label expansion; widget_kind=none means no widgets detected",
+		},
+		"type_by_evaluator.tsv": {
+			"unit": "each file contributes once per (type, evaluator_kind) pair",
+			"notes": "multi-label expansion; evaluator_kind=none means no evaluators detected",
+		},
+		"type_by_evaluator_source.tsv": {
+			"unit": "each file contributes once per (type, evaluator_source) pair",
+			"notes": "multi-label expansion; evaluator_source=none means no evaluators detected",
+		},
+		"widget_by_evaluator.tsv": {
+			"unit": "each file contributes once per (widget_kind, evaluator_kind) pair",
+			"notes": "widget_kind/evaluator_kind are deduped per file; 'none' means none detected",
+		},
+		"input_count_hist.tsv": {
+			"unit": "each file contributes to exactly one input_count bucket",
+			"notes": "buckets are 0,1,2,3,4,5-9,10-19,20+",
+		},
+		"ans_count_hist.tsv": {
+			"unit": "each file contributes to exactly one ANS(...) count bucket",
+			"notes": "counts only ANS-call evaluators; buckets are 0,1,2,3,4,5-9,10-19,20+",
+		},
+		"ans_token_hist.tsv": {
+			"unit": "each file contributes to exactly one ANS token count bucket",
+			"notes": "counts occurrences of 'ANS(' after comment/heredoc preprocessing; buckets are 0,1,2,3,4,5-9,10-19,20+",
+		},
+		"pgml_blank_marker_hist.tsv": {
+			"unit": "each file contributes to exactly one PGML blank marker count bucket",
+			"notes": "counts [_] markers inside PGML blocks; buckets are 0,1,2,3,4,5-9,10-19,20+",
+		},
+		"other_pgml_blank_hist.tsv": {
+			"population": "files labeled other",
+			"unit": "each file contributes to exactly one PGML blank marker count bucket",
+			"notes": "counts [_] markers inside PGML blocks; buckets are 0,1,2,3,4,5-9,10-19,20+",
+		},
+		"needs_review.tsv": {
+			"population": "a stratified sample of needs_review files",
+			"unit": "one sampled file per row",
+			"notes": "up to 40 samples per bucket, up to 200 total; includes compact signal columns",
+			"sorted": "bucket-stratified, then lower confidence first",
+		},
+		"needs_review_bucket_counts.tsv": {
+			"population": "all needs_review files",
+			"unit": "each file contributes to exactly one needs_review bucket",
+			"notes": "buckets are derived from extracted signals (widgets/evaluators/macros/counts)",
+		},
+		"needs_review_type_counts.tsv": {
+			"population": "all needs_review files",
+			"unit": "each file contributes 1 to each type label it matches",
+			"notes": "multi-label expansion",
+		},
+		"needs_review_macro_counts.tsv": {
+			"population": "all needs_review files",
+			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
+			"notes": "restricted to files flagged needs_review",
+		},
+		"evaluator_coverage_reasons.tsv": {
+			"population": "files with no evaluators detected",
+			"unit": "each file contributes to exactly one reason bucket",
+			"notes": "helps distinguish 'no ANS' vs 'missed extraction' signals",
+		},
+		"macro_counts_other.tsv": {
+			"population": "files labeled other",
+			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
+			"notes": "macro counts restricted to other-labeled files",
+		},
+		"macro_counts_unknown_pgml_blank.tsv": {
+			"population": "files labeled unknown_pgml_blank",
+			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
+			"notes": "macro counts restricted to unknown_pgml_blank files",
+		},
+		"macro_counts_eval_none_numeric_entry.tsv": {
+			"population": "files labeled numeric_entry with no evaluators detected",
+			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
+			"notes": "macro counts restricted to numeric_entry + evaluator none",
+		},
+		"macro_counts_eval_none_multiple_choice.tsv": {
+			"population": "files labeled multiple_choice with no evaluators detected",
+			"unit": "each file contributes 1 to each macro it loadMacros(...) (deduped per file)",
+			"notes": "macro counts restricted to multiple_choice + evaluator none",
+		},
+		"other_breakdown.tsv": {
+			"population": "files labeled other",
+			"unit": "each file contributes to exactly one other bucket",
+			"notes": "bucketed by extracted signals to separate missing detection vs true other",
+		},
+		"other_samples.tsv": {
+			"population": "a bounded sample of other-labeled files",
+			"unit": "one sampled file per row",
+			"notes": "up to 50 rows combined across a few selection strategies",
+			"sorted": "mixed (multiple selection strategies), then stable within each",
+		},
+		"widget_counts_other.tsv": {
+			"population": "files labeled other",
+			"unit": "each detected widget occurrence contributes 1",
+			"notes": "widget counts restricted to other-labeled files",
+		},
+		"evaluator_counts_other.tsv": {
+			"population": "files labeled other",
+			"unit": "each detected evaluator occurrence contributes 1",
+			"notes": "evaluator counts restricted to other-labeled files",
+		},
+		"samples_unknown_pgml_blank.tsv": {
+			"population": "a bounded sample of unknown_pgml_blank files",
+			"unit": "one sampled file per row (first N in traversal order)",
+			"notes": "intended for quick spot checks without per-file outputs",
+			"sorted": "traversal order",
+		},
+		"samples_eval_none_numeric_entry.tsv": {
+			"population": "a bounded sample of numeric_entry files with evaluator none",
+			"unit": "one sampled file per row (first N in traversal order)",
+			"notes": "intended for quick spot checks without per-file outputs",
+			"sorted": "traversal order",
+		},
+	}
+
+	meta = default.copy()
+	meta.update(table.get(name, {}))
+	return meta
 
 
 #============================================
