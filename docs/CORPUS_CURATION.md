@@ -7,6 +7,20 @@ Training preference:
 
 - I want a corpus of pg files based on modern techniques and would prefer to not train any AI on legacy techniques.
 
+## Interaction profile (modern-techniques focus)
+
+This corpus is "OPL-shaped": it is dominated by MathObjects numeric entry and PGchoice-style widgets (PopUp and
+RadioButtons). Matching-style problems are treated as a detector-only category, not a core bucket, because matching
+widgets are effectively absent in this fork.
+
+Evidence is captured per run by `pg_analyze` in `summary/corpus_profile.tsv`.
+
+As of 2026-01-17 (a run over this fork), the profile reported:
+
+- `parserMatch.pl`: 0 macro loads
+- `MatchList(`: 0 files containing the token
+- `parserAssignment.pl`: present (528 macro loads)
+
 ## What we removed
 
 ### Non problem-source files

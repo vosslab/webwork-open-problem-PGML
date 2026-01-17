@@ -86,6 +86,13 @@ def classify(report: dict) -> tuple[dict, bool]:
 		types.append("matching")
 		add_reason("widget", "matching")
 
+	if widget_kind_counts.get("ordering", 0) > 0 or "parserAssignment.pl" in load_macros:
+		types.append("assignment_ordering")
+		if widget_kind_counts.get("ordering", 0) > 0:
+			add_reason("widget", "ordering")
+		if "parserAssignment.pl" in load_macros:
+			add_reason("macro", "parserAssignment.pl")
+
 	if widget_kind_counts.get("ordering", 0) > 0:
 		types.append("ordering")
 		add_reason("widget", "ordering")

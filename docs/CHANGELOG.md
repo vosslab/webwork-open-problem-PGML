@@ -32,3 +32,9 @@
 - Refine `pgml_star_spec` evaluator kinds into indirect and expression forms using a lightweight symbol table, add a `matrix_entry` subtype tag (with counts and bucket lists), and rename the dominant unknown signature to `pgml_blank_star_spec_only` when applicable.
 - Consolidate most aggregate stats outputs into a few long-format summary tables (`summary/counts_all.tsv`, `summary/cross_tabs_all.tsv`, `summary/histograms_all.tsv`, `summary/macro_counts_segmented.tsv`) and clean up obsolete output files on each run.
 - Document the training preference to focus on modern techniques and avoid training AI on legacy techniques (`README.md`, `docs/CORPUS_CURATION.md`).
+- Document the intended interaction profile (numeric entry + PGchoice widgets; matching as a rare-flag category) and add `summary/corpus_profile.tsv` plus an `assignment_ordering` type for parserAssignment-based problems.
+- Record corpus profile evidence (as of 2026-01-17): `parserMatch.pl=0`, `MatchList=0`, `parserAssignment.pl` present.
+- Add a discipline breakdown based on `## DBsubject(...)` metadata, producing `summary/discipline_counts.tsv`, `summary/discipline_subject_counts.tsv`, and `summary/discipline_coverage.tsv` plus per-discipline file lists under `lists/discipline/`.
+- Expand DBsubject bucketing to reduce "other" by adding `engineering` and strengthening `chemistry`, plus optional `cs`, `finance`, and `meta` buckets.
+- Refine DBsubject bucketing for OPL: split `grade_level` and `meta_noise`/`meta_missing`, expand engineering/physics patterns and typo normalization, fix arithmetic-style DBsubjects as math, and add `discipline_unclassified_subject_counts.tsv` + `discipline_samples.tsv`.
+- Add capped content-hint audit outputs (`content_hints/chem_terms_count.tsv`, `content_hints/bio_terms_count.tsv`) for later classifier development without using content scanning for discipline bucketing.

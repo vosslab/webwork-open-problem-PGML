@@ -158,6 +158,11 @@ import pg_analyze.main
 			lambda r: ("ordering" in r["types"] and "ordering" in r["widget_kinds"]),
 		),
 		(
+			"parserassignment_type",
+			"loadMacros('parserAssignment.pl');\n",
+			lambda r: ("assignment_ordering" in r["types"]),
+		),
+		(
 			"string_cmp",
 			"ANS(str_cmp('hi'));\n",
 			lambda r: ("fib_word" in r["types"] and "str_cmp" in r["evaluator_kinds"]),

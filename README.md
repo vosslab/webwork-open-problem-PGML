@@ -31,6 +31,8 @@ This fork was curated by removing non-problem-source files and filtering `*.pg` 
 ## Notes
 
 - I want a corpus of pg files based on modern techniques and would prefer to not train any AI on legacy techniques.
+- The corpus interaction profile is dominated by MathObjects numeric entry and PGchoice-style widgets; `pg_analyze`
+  writes a small per-run summary to `summary/corpus_profile.tsv` under the chosen output directory.
 - The upstream OPL is maintained at [openwebwork/webwork-open-problem-library](https://github.com/openwebwork/webwork-open-problem-library).
 - OPL background and conventions: [WeBWorK Documentation Wiki](https://webwork.maa.org/wiki/Open_Problem_Library).
 - Licensing details for problems in this repo: [OPL_LICENSE](OPL_LICENSE).

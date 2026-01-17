@@ -10,6 +10,7 @@ import time
 # Local modules
 import pg_analyze.aggregate
 import pg_analyze.classify
+import pg_analyze.discipline
 import pg_analyze.extract_answers
 import pg_analyze.extract_evaluators
 import pg_analyze.extract_widgets
@@ -290,6 +291,7 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 	has_install_problem_grader = 1 if bool(_INSTALL_PROBLEM_GRADER_RX.search(clean)) else 0
 	has_ans_rule_token = 1 if bool(_ANS_RULE_TOKEN_RX.search(clean)) else 0
 	has_named_popup_list_token = 1 if bool(_NAMED_POPUP_LIST_TOKEN_RX.search(clean)) else 0
+	has_matchlist_token = 1 if bool(_MATCHLIST_TOKEN_RX.search(clean)) else 0
 
 	pgml_blank_count = int(_pgml_info.get("blank_count", 0) or 0)
 	pgml_block_count = int(_pgml_info.get("block_count", 0) or 0)
@@ -341,7 +343,28 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"has_install_problem_grader": has_install_problem_grader,
 		"has_ans_rule_token": has_ans_rule_token,
 		"has_named_popup_list_token": has_named_popup_list_token,
+		"has_matchlist_token": has_matchlist_token,
 	}
+
+	dbsubjects = pg_analyze.discipline.extract_dbsubjects(text)
+	dbsubject_lines_total = len(dbsubjects)
+	dbsubject_lines_blank = sum(1 for s in dbsubjects if not s.strip())
+	has_dbsubject = 1 if dbsubject_lines_total > 0 else 0
+	discipline_primary = pg_analyze.discipline.primary_discipline(dbsubjects)
+	discipline_primary_subject = pg_analyze.discipline.primary_subject(dbsubjects)
+	record["dbsubjects"] = dbsubjects
+	record["dbsubject_lines_total"] = dbsubject_lines_total
+	record["dbsubject_lines_blank"] = dbsubject_lines_blank
+	record["has_dbsubject"] = has_dbsubject
+	record["discipline_primary"] = discipline_primary
+	record["discipline_primary_subject"] = discipline_primary_subject
+
+	chem_hint = pg_analyze.discipline.first_chem_hint(text)
+	if chem_hint is not None:
+		record["chem_hint"] = chem_hint
+	bio_hint = pg_analyze.discipline.first_bio_hint(text)
+	if bio_hint is not None:
+		record["bio_hint"] = bio_hint
 
 	bucket = pg_analyze.aggregate.needs_review_bucket(record)
 	needs_review = (confidence < 0.55) or ((ans_count >= 2) and wiring_empty) or bool(bucket)
@@ -525,6 +548,7 @@ def _write_index(out_dir: str) -> None:
 		"",
 		"Start here:",
 		"- summary/coverage_widgets_vs_evaluator_source.tsv",
+		"- summary/corpus_profile.tsv",
 		"- summary/counts_all.tsv",
 		"- summary/cross_tabs_all.tsv",
 		"- summary/histograms_all.tsv",
@@ -543,6 +567,15 @@ def _write_index(out_dir: str) -> None:
 		"",
 		"For tuning:",
 		"- needs_review/evaluator_missing_reasons_counts.tsv",
+		"",
+		"Discipline breakdown:",
+		"- summary/discipline_counts.tsv",
+		"- summary/discipline_subject_counts.tsv",
+		"- summary/discipline_unclassified_subject_counts.tsv",
+		"- summary/discipline_samples.tsv",
+		"- summary/discipline_coverage.tsv",
+		"- content_hints/chem_terms_count.tsv",
+		"- content_hints/bio_terms_count.tsv",
 		"",
 		"For examples:",
 		"- diagnostics/pgml_blocks_unknown_pgml_blank_top_signatures.txt",
@@ -576,6 +609,11 @@ def _tsv_meta(name: str) -> dict[str, str]:
 	}
 
 	table: dict[str, dict[str, str]] = {
+		"corpus_profile.tsv": {
+			"unit": "one small profile snapshot per run",
+			"notes": "key macro counts and token counts to summarize the corpus interaction profile",
+			"sorted": "row order is fixed; do not sort",
+		},
 		"counts_all.tsv": {
 			"unit": "each row is a (group, scope, key) count",
 			"notes": "group and scope define the population; key is the item being counted",
@@ -595,6 +633,48 @@ def _tsv_meta(name: str) -> dict[str, str]:
 			"unit": "each row is a (segment, macro) count",
 			"notes": "segment restricts the population (e.g. unknown_pgml_blank, eval_none_numeric_entry)",
 			"sorted": "segment asc, count desc, macro asc",
+		},
+		"discipline_counts.tsv": {
+			"population": "all .pg files under roots (DBsubject lines only)",
+			"unit": "each DBsubject line contributes 1 to exactly one discipline",
+			"notes": "counts are DBsubject-line counts (not file counts); only lines starting with '## DBsubject(' are considered",
+			"sorted": "discipline order is fixed",
+		},
+		"discipline_subject_counts.tsv": {
+			"population": "all .pg files under roots (DBsubject lines only)",
+			"unit": "each DBsubject line contributes 1 to (discipline, subject_raw)",
+			"notes": "subject_raw is normalized (quotes stripped, trimmed, lowercased); top subjects per discipline only",
+			"sorted": "discipline order is fixed; within discipline count desc, then subject asc",
+		},
+		"discipline_coverage.tsv": {
+			"population": "all .pg files under roots",
+			"unit": "file and line coverage metrics for DBsubject",
+			"notes": "multi-subject files contribute multiple DBsubject lines; blanks are counted after normalization",
+			"sorted": "row order is fixed; do not sort",
+		},
+		"discipline_unclassified_subject_counts.tsv": {
+			"population": "DBsubject lines bucketed as other",
+			"unit": "each DBsubject line contributes 1 to its raw subject string",
+			"notes": "top unclassified subjects to drive taxonomy tuning; subject_raw is normalized",
+			"sorted": "count desc, then subject asc",
+		},
+		"discipline_samples.tsv": {
+			"population": "files with a primary discipline bucket",
+			"unit": "one row per sampled file (per bucket)",
+			"notes": "deterministic first-N samples in traversal order; primary_subject is the first non-blank DBsubject string",
+			"sorted": "discipline order is fixed; within discipline traversal order",
+		},
+		"chem_terms_count.tsv": {
+			"population": "content-hint audit (not used for classification)",
+			"unit": "one row per matched file (capped)",
+			"notes": "first hit per file, capped overall; helps audit chemistry-like terms without classifying by content",
+			"sorted": "traversal order (capped)",
+		},
+		"bio_terms_count.tsv": {
+			"population": "content-hint audit (not used for classification)",
+			"unit": "one row per matched file (capped)",
+			"notes": "first hit per file, capped overall; helps audit biology-like terms without classifying by content",
+			"sorted": "traversal order (capped)",
 		},
 		"coverage.tsv": {
 			"unit": "each file contributes to exactly one bucket",
@@ -773,6 +853,7 @@ _INSTALL_PROBLEM_GRADER_RX = re.compile(r"\binstall_problem_grader\b")
 _CTOR_TOKEN_RX = re.compile(r"\b(Real|Formula|Compute|String|List|Vector|Point)\s*\(")
 _ANS_RULE_TOKEN_RX = re.compile(r"\b(ans_rule|answerRule|ans_box)\s*\(")
 _NAMED_POPUP_LIST_TOKEN_RX = re.compile(r"\bNAMED_POP_UP_LIST\s*\(")
+_MATCHLIST_TOKEN_RX = re.compile(r"\bMatchList\s*\(")
 
 
 def _extract_named_rule_refs(evaluators: list[dict]) -> list[str]:

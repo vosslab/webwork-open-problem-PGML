@@ -1,6 +1,9 @@
 # Standard Library
 import heapq
 
+# Local modules
+import pg_analyze.discipline
+
 
 #============================================
 
@@ -117,9 +120,17 @@ OUTPUT_PATHS: dict[str, str] = {
 	# summary/
 	"counts_all.tsv": "summary/counts_all.tsv",
 	"cross_tabs_all.tsv": "summary/cross_tabs_all.tsv",
+	"corpus_profile.tsv": "summary/corpus_profile.tsv",
 	"histograms_all.tsv": "summary/histograms_all.tsv",
 	"macro_counts_segmented.tsv": "summary/macro_counts_segmented.tsv",
 	"coverage.tsv": "summary/coverage_widgets_vs_evaluator_source.tsv",
+	"discipline_counts.tsv": "summary/discipline_counts.tsv",
+	"discipline_subject_counts.tsv": "summary/discipline_subject_counts.tsv",
+	"discipline_coverage.tsv": "summary/discipline_coverage.tsv",
+	"discipline_unclassified_subject_counts.tsv": "summary/discipline_unclassified_subject_counts.tsv",
+	"discipline_samples.tsv": "summary/discipline_samples.tsv",
+	"chem_terms_count.tsv": "content_hints/chem_terms_count.tsv",
+	"bio_terms_count.tsv": "content_hints/bio_terms_count.tsv",
 
 	# needs_review/
 	"needs_review.tsv": "needs_review/needs_review_samples_topN.tsv",
@@ -206,6 +217,20 @@ def _has_strong_widget_macro(load_macros: list[str]) -> bool:
 
 class Aggregator:
 	def __init__(self, *, needs_review_limit: int = 200, out_dir: str | None = None):
+		self.total_files = 0
+		self.matchlist_files = 0
+		self.files_with_dbsubject = 0
+		self.dbsubject_lines_total = 0
+		self.dbsubject_lines_blank = 0
+		self.discipline_line_counts: dict[str, int] = {d: 0 for d in pg_analyze.discipline.DISCIPLINES}
+		self.discipline_subject_counts: dict[tuple[str, str], int] = {}
+		self.discipline_primary_subject_counts: dict[tuple[str, str], int] = {}
+		self.discipline_sample_files: dict[str, list[tuple[str, str]]] = {}
+		self._chem_hint_rows: list[tuple[str, int, str, str]] = []
+		self._bio_hint_rows: list[tuple[str, int, str, str]] = []
+		self._chem_hint_cap = 200
+		self._bio_hint_cap = 200
+
 		self.type_counts: dict[str, int] = {}
 		self.confidence_bins: dict[str, int] = {}
 		self.macro_counts: dict[str, int] = {}
@@ -269,6 +294,12 @@ class Aggregator:
 		self._bucket_writers = BucketWriters(out_dir) if isinstance(out_dir, str) and out_dir else None
 
 	def add_record(self, record: dict) -> None:
+		self.total_files += 1
+		if int(record.get("has_matchlist_token", 0) or 0) > 0:
+			self.matchlist_files += 1
+
+		self._add_discipline(record)
+
 		types = record.get("types", [])
 		confidence = record.get("confidence", 0.0)
 		load_macros = record.get("loadMacros", [])
@@ -560,8 +591,16 @@ class Aggregator:
 		out: dict[str, str] = {}
 		out["counts_all.tsv"] = self._render_counts_all_tsv()
 		out["cross_tabs_all.tsv"] = self._render_cross_tabs_all_tsv()
+		out["corpus_profile.tsv"] = self._render_corpus_profile_tsv()
 		out["histograms_all.tsv"] = self._render_histograms_all_tsv()
 		out["macro_counts_segmented.tsv"] = self._render_macro_counts_segmented_tsv()
+		out["discipline_counts.tsv"] = self._render_discipline_counts_tsv()
+		out["discipline_subject_counts.tsv"] = self._render_discipline_subject_counts_tsv(top_n=50)
+		out["discipline_unclassified_subject_counts.tsv"] = self._render_discipline_unclassified_subject_counts_tsv(top_n=50)
+		out["discipline_samples.tsv"] = self._render_discipline_samples_tsv(per_bucket=25)
+		out["discipline_coverage.tsv"] = self._render_discipline_coverage_tsv()
+		out["chem_terms_count.tsv"] = self._render_content_hints_tsv(self._chem_hint_rows)
+		out["bio_terms_count.tsv"] = self._render_content_hints_tsv(self._bio_hint_rows)
 		out["needs_review.tsv"] = self._render_needs_review_tsv()
 		out["needs_review_bucket_counts.tsv"] = _render_counts_tsv(list(self.needs_review_bucket_counts.items()), key_name="bucket")
 		out["needs_review_type_counts.tsv"] = _render_counts_tsv(list(self.needs_review_type_counts.items()), key_name="type")
@@ -588,6 +627,151 @@ class Aggregator:
 		)
 		out["evaluator_coverage_reasons.tsv"] = _render_counts_tsv(list(self.evaluator_coverage_reasons.items()), key_name="reason")
 		return out
+
+	def _add_discipline(self, record: dict) -> None:
+		subjects = record.get("dbsubjects", [])
+		if not isinstance(subjects, list):
+			subjects = []
+
+		lines_total = int(record.get("dbsubject_lines_total", 0) or 0)
+		lines_blank = int(record.get("dbsubject_lines_blank", 0) or 0)
+		has_dbsubject = int(record.get("has_dbsubject", 0) or 0) > 0
+
+		if has_dbsubject:
+			self.files_with_dbsubject += 1
+		self.dbsubject_lines_total += lines_total
+		self.dbsubject_lines_blank += lines_blank
+
+		for s in subjects:
+			if not isinstance(s, str):
+				continue
+			subject = s.strip()
+			discipline = pg_analyze.discipline.bucket_subject(subject)
+			if discipline not in self.discipline_line_counts:
+				discipline = "other"
+			self.discipline_line_counts[discipline] += 1
+			key = (discipline, subject)
+			self.discipline_subject_counts[key] = self.discipline_subject_counts.get(key, 0) + 1
+
+		primary = record.get("discipline_primary", "other")
+		if not isinstance(primary, str) or not primary:
+			primary = "other"
+		if primary not in self.discipline_line_counts:
+			primary = "other"
+		primary_subject = record.get("discipline_primary_subject", "")
+		if not isinstance(primary_subject, str):
+			primary_subject = ""
+		primary_subject = primary_subject.strip()
+		primary_key = (primary, primary_subject)
+		self.discipline_primary_subject_counts[primary_key] = self.discipline_primary_subject_counts.get(primary_key, 0) + 1
+
+		file_path = record.get("file", "")
+		if isinstance(file_path, str) and file_path:
+			samples = self.discipline_sample_files.setdefault(primary, [])
+			if len(samples) < 25:
+				samples.append((file_path, primary_subject))
+
+		self._add_content_hints(record)
+
+	def _add_content_hints(self, record: dict) -> None:
+		file_path = record.get("file", "")
+		if not isinstance(file_path, str) or not file_path:
+			return
+
+		chem = record.get("chem_hint")
+		if (
+			chem
+			and isinstance(chem, tuple)
+			and len(chem) == 3
+			and len(self._chem_hint_rows) < self._chem_hint_cap
+		):
+			term, line, snippet = chem
+			if isinstance(term, str) and isinstance(line, int) and isinstance(snippet, str):
+				self._chem_hint_rows.append((file_path, line, term, snippet))
+
+		bio = record.get("bio_hint")
+		if (
+			bio
+			and isinstance(bio, tuple)
+			and len(bio) == 3
+			and len(self._bio_hint_rows) < self._bio_hint_cap
+		):
+			term, line, snippet = bio
+			if isinstance(term, str) and isinstance(line, int) and isinstance(snippet, str):
+				self._bio_hint_rows.append((file_path, line, term, snippet))
+
+	def _render_discipline_counts_tsv(self) -> str:
+		lines: list[str] = ["discipline\tcount"]
+		for d in pg_analyze.discipline.DISCIPLINES:
+			lines.append(f"{d}\t{self.discipline_line_counts.get(d, 0)}")
+		return "\n".join(lines) + "\n"
+
+	def _render_discipline_subject_counts_tsv(self, *, top_n: int) -> str:
+		lines: list[str] = ["discipline\tsubject_raw\tcount"]
+		for d in pg_analyze.discipline.DISCIPLINES:
+			items = [(subject, count) for (disc, subject), count in self.discipline_subject_counts.items() if disc == d]
+			items_sorted = sorted(items, key=lambda x: (-x[1], x[0]))[:top_n]
+			for subject, count in items_sorted:
+				lines.append(f"{d}\t{subject}\t{count}")
+		return "\n".join(lines) + "\n"
+
+	def _render_discipline_unclassified_subject_counts_tsv(self, *, top_n: int) -> str:
+		lines: list[str] = ["subject_raw\tcount"]
+		items = [(subject, count) for (disc, subject), count in self.discipline_subject_counts.items() if disc == "other"]
+		items_sorted = sorted(items, key=lambda x: (-x[1], x[0]))[:top_n]
+		for subject, count in items_sorted:
+			lines.append(f"{subject}\t{count}")
+		return "\n".join(lines) + "\n"
+
+	def _render_discipline_samples_tsv(self, *, per_bucket: int) -> str:
+		lines: list[str] = ["discipline\tfile\tprimary_subject"]
+		for d in pg_analyze.discipline.DISCIPLINES:
+			samples = self.discipline_sample_files.get(d, [])
+			for file_path, primary_subject in samples[:per_bucket]:
+				lines.append(f"{d}\t{file_path}\t{primary_subject}")
+		return "\n".join(lines) + "\n"
+
+	def _render_content_hints_tsv(self, rows: list[tuple[str, int, str, str]]) -> str:
+		lines: list[str] = ["file\tline\tterm\tsnippet"]
+		for file_path, line, term, snippet in rows:
+			lines.append(f"{file_path}\t{line}\t{term}\t{snippet}")
+		return "\n".join(lines) + "\n"
+
+	def _render_discipline_coverage_tsv(self) -> str:
+		files_total = self.total_files
+		files_with = self.files_with_dbsubject
+		files_without = files_total - files_with
+		lines: list[str] = ["metric\tcount"]
+		lines.append(f"files_total\t{files_total}")
+		lines.append(f"files_with_dbsubject\t{files_with}")
+		lines.append(f"files_without_dbsubject\t{files_without}")
+		lines.append(f"dbsubject_lines_total\t{self.dbsubject_lines_total}")
+		lines.append(f"dbsubject_lines_blank\t{self.dbsubject_lines_blank}")
+		return "\n".join(lines) + "\n"
+
+	def _render_corpus_profile_tsv(self) -> str:
+		"""
+		Write a small, stable corpus-profile table for quick orientation.
+		"""
+		key_macros = [
+			"MathObjects.pl",
+			"PGchoicemacros.pl",
+			"PGML.pl",
+			"PGgraphmacros.pl",
+			"parserPopUp.pl",
+			"parserRadioButtons.pl",
+			"parserAssignment.pl",
+			"parserMatch.pl",
+		]
+
+		lines: list[str] = ["metric\tvalue"]
+		lines.append(f"total_files\t{self.total_files}")
+
+		for macro in key_macros:
+			lines.append(f"macro_files:{macro}\t{self.macro_counts.get(macro, 0)}")
+
+		lines.append(f"token_files:MatchList\t{self.matchlist_files}")
+		return "\n".join(lines) + "\n"
 
 	def _render_counts_all_tsv(self) -> str:
 		rows: list[tuple[str, str, str, int]] = []
@@ -1076,6 +1260,7 @@ class BucketWriters:
 		import os
 		os.makedirs(os.path.join(self._base, "type"), exist_ok=True)
 		os.makedirs(os.path.join(self._base, "subtype"), exist_ok=True)
+		os.makedirs(os.path.join(self._base, "discipline"), exist_ok=True)
 		os.makedirs(os.path.join(self._base, "widget"), exist_ok=True)
 		os.makedirs(os.path.join(self._base, "evaluator"), exist_ok=True)
 
@@ -1114,6 +1299,11 @@ class BucketWriters:
 		if isinstance(subtypes, list) and subtypes:
 			for st in sorted({x for x in subtypes if isinstance(x, str) and x}):
 				self._get_handle("subtype", st).write(file_path + "\n")
+
+		discipline = record.get("discipline_primary", "other")
+		if not isinstance(discipline, str) or not discipline:
+			discipline = "other"
+		self._get_handle("discipline", discipline).write(file_path + "\n")
 
 		for w in sorted({x for x in widgets if isinstance(x, str) and x}):
 			self._get_handle("widget", w).write(file_path + "\n")
