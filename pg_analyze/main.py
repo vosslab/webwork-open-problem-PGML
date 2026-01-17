@@ -2,6 +2,7 @@
 
 # Standard Library
 import argparse
+import hashlib
 import os
 import re
 import sys
@@ -26,6 +27,9 @@ _ANSWERFORMATHELP_MATRICES_RX = re.compile(
 	r"""(?i)\bAnswerFormatHelp\s*\(\s*['"]matrices['"]\s*\)"""
 )
 
+_RANDOMIZATION_CALL_RX = re.compile(r"\b(?:random|list_random)\s*\(")
+_RESOURCES_QUOTED_RX = re.compile(r"""['"]([^'"]+)['"]""")
+
 
 def main() -> None:
 	start = time.perf_counter()
@@ -40,13 +44,18 @@ def main() -> None:
 	os.makedirs(args.out_dir, exist_ok=True)
 	out_dir_abs = os.path.abspath(args.out_dir)
 	aggregator = pg_analyze.aggregate.Aggregator(needs_review_limit=200, out_dir=args.out_dir)
+	roots_abs = [os.path.abspath(r) for r in roots]
 
 	try:
 		_log("pg_analyze: analyzing files...")
 		last_progress = time.perf_counter()
 		for i, file_path in enumerate(pg_files, start=1):
-			text = _read_text_latin1(file_path)
+			raw_bytes = _read_bytes(file_path)
+			text = raw_bytes.decode("latin-1")
 			record = analyze_text(text=text, file_path=file_path)
+			record["file_rel"] = _file_rel_to_roots(file_path=file_path, roots_abs=roots_abs)
+			record["sha256"] = hashlib.sha256(raw_bytes).hexdigest()
+			record["sha256_ws"] = hashlib.sha256(raw_bytes.translate(None, b" \t\r\n")).hexdigest()
 			aggregator.add_record(record)
 			last_progress = _maybe_log_progress(last_progress, done=i, total=len(pg_files))
 		_log("pg_analyze: writing outputs...")
@@ -255,6 +264,8 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 	named_rule_refs = _extract_named_rule_refs(evaluators)
 
 	subtype_tags = _extract_subtype_tags_from_pgml(text)
+	resource_exts = _extract_resource_exts(clean, newlines=newlines)
+	has_randomization = 1 if bool(_RANDOMIZATION_CALL_RX.search(clean)) else 0
 
 	report = {
 		"file": file_path,
@@ -332,6 +343,9 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"pgml_block_count": pgml_block_count,
 		"pgml_blank_marker_count": pgml_blank_count,
 		"ans_token_count": ans_token_count,
+		"has_randomization": has_randomization,
+		"has_resources": 1 if resource_exts else 0,
+		"resource_exts": resource_exts,
 		"has_ans_token": has_ans_token,
 		"has_cmp_token": has_cmp_token,
 		"has_num_cmp_token": has_num_cmp_token,
@@ -346,18 +360,66 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"has_matchlist_token": has_matchlist_token,
 	}
 
-	dbsubjects = pg_analyze.discipline.extract_dbsubjects(text)
-	dbsubject_lines_total = len(dbsubjects)
-	dbsubject_lines_blank = sum(1 for s in dbsubjects if not s.strip())
+	dbsubject_pairs = pg_analyze.discipline.extract_dbsubjects_pairs(text)
+	dbsubjects_raw = [raw for raw, _norm in dbsubject_pairs]
+	dbsubjects = [norm for _raw, norm in dbsubject_pairs]
+	dbsubject_lines_total = len(dbsubject_pairs)
+	dbsubject_lines_blank = sum(1 for raw, _norm in dbsubject_pairs if not raw.strip())
 	has_dbsubject = 1 if dbsubject_lines_total > 0 else 0
+	has_dbsubject_nonblank = 1 if any(raw.strip() for raw in dbsubjects_raw) else 0
 	discipline_primary = pg_analyze.discipline.primary_discipline(dbsubjects)
 	discipline_primary_subject = pg_analyze.discipline.primary_subject(dbsubjects)
+	discipline_primary_subject_raw = ""
+	for raw in dbsubjects_raw:
+		if raw.strip():
+			discipline_primary_subject_raw = raw.strip()
+			break
+
+	dbchapter_pairs = pg_analyze.discipline.extract_dbchapters_pairs(text)
+	dbchapters_raw = [raw for raw, _norm in dbchapter_pairs]
+	dbchapters = [norm for _raw, norm in dbchapter_pairs]
+	dbchapter_lines_total = len(dbchapter_pairs)
+	dbchapter_lines_blank = sum(1 for raw, _norm in dbchapter_pairs if not raw.strip())
+	has_dbchapter = 1 if dbchapter_lines_total > 0 else 0
+	has_dbchapter_nonblank = 1 if any(raw.strip() for raw in dbchapters_raw) else 0
+
+	dbsection_pairs = pg_analyze.discipline.extract_dbsections_pairs(text)
+	dbsections_raw = [raw for raw, _norm in dbsection_pairs]
+	dbsections = [norm for _raw, norm in dbsection_pairs]
+	dbsection_lines_total = len(dbsection_pairs)
+	dbsection_lines_blank = sum(1 for raw, _norm in dbsection_pairs if not raw.strip())
+	has_dbsection = 1 if dbsection_lines_total > 0 else 0
+	has_dbsection_nonblank = 1 if any(raw.strip() for raw in dbsections_raw) else 0
+
+	record["dbsubject_pairs"] = dbsubject_pairs
+	record["dbchapter_pairs"] = dbchapter_pairs
+	record["dbsection_pairs"] = dbsection_pairs
+	record["dbsubjects_raw"] = dbsubjects_raw
 	record["dbsubjects"] = dbsubjects
 	record["dbsubject_lines_total"] = dbsubject_lines_total
 	record["dbsubject_lines_blank"] = dbsubject_lines_blank
 	record["has_dbsubject"] = has_dbsubject
+	record["has_dbsubject_nonblank"] = has_dbsubject_nonblank
 	record["discipline_primary"] = discipline_primary
 	record["discipline_primary_subject"] = discipline_primary_subject
+	record["discipline_primary_subject_raw"] = discipline_primary_subject_raw
+
+	record["dbchapters_raw"] = dbchapters_raw
+	record["dbchapters"] = dbchapters
+	record["dbchapter_lines_total"] = dbchapter_lines_total
+	record["dbchapter_lines_blank"] = dbchapter_lines_blank
+	record["has_dbchapter"] = has_dbchapter
+	record["has_dbchapter_nonblank"] = has_dbchapter_nonblank
+
+	record["dbsections_raw"] = dbsections_raw
+	record["dbsections"] = dbsections
+	record["dbsection_lines_total"] = dbsection_lines_total
+	record["dbsection_lines_blank"] = dbsection_lines_blank
+	record["has_dbsection"] = has_dbsection
+	record["has_dbsection_nonblank"] = has_dbsection_nonblank
+
+	record["chem_terms_present"] = pg_analyze.discipline.chem_terms_present(text)
+	record["bio_terms_present"] = pg_analyze.discipline.bio_terms_present(text)
 
 	chem_hint = pg_analyze.discipline.first_chem_hint(text)
 	if chem_hint is not None:
@@ -379,8 +441,52 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 
 
 def _read_text_latin1(path: str) -> str:
-	with open(path, "r", encoding="latin-1") as f:
+	return _read_bytes(path).decode("latin-1")
+
+
+def _read_bytes(path: str) -> bytes:
+	with open(path, "rb") as f:
 		return f.read()
+
+
+def _file_rel_to_roots(*, file_path: str, roots_abs: list[str]) -> str:
+	abs_file = os.path.abspath(file_path)
+	best_root: str | None = None
+	for r in roots_abs:
+		r2 = os.path.abspath(r)
+		if abs_file == r2:
+			best_root = r2
+			break
+		prefix = r2 + os.sep
+		if abs_file.startswith(prefix):
+			if best_root is None or len(r2) > len(best_root):
+				best_root = r2
+	if best_root is None:
+		return os.path.basename(file_path)
+	return os.path.relpath(abs_file, best_root)
+
+
+def _extract_resource_exts(text: str, *, newlines: list[int]) -> list[str]:
+	"""
+	Extract resource file extensions from Resources(...) calls.
+
+	This is intentionally shallow; it is used for aggregate-only reporting.
+	"""
+	calls = pg_analyze.tokenize.iter_calls(text, {"Resources"}, newlines=newlines)
+	exts: set[str] = set()
+	for c in calls:
+		for m in _RESOURCES_QUOTED_RX.finditer(c.arg_text):
+			val = m.group(1).strip()
+			if not val:
+				continue
+			_ext = os.path.splitext(val)[1].lower()
+			if not _ext:
+				continue
+			ext = _ext.lstrip(".")
+			if not ext:
+				continue
+			exts.add(ext)
+	return sorted(exts)
 
 
 #============================================

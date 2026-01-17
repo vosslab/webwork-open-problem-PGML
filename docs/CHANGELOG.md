@@ -40,3 +40,4 @@
 - Add capped content-hint audit outputs (`content_hints/chem_terms_count.tsv`, `content_hints/bio_terms_count.tsv`) for later classifier development without using content scanning for discipline bucketing.
 - Add [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md) to summarize the current `output/` corpus reports in a human-readable form.
 - Clarify the full-OPL vs PGML-corpus comparison in [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md), link it from `README.md`, and avoid hard-coding an `output/` directory name in [docs/CORPUS_CURATION.md](docs/CORPUS_CURATION.md).
+- Expand [docs/CORPUS_STATS.md](docs/CORPUS_STATS.md) with macro/type highlights, selected cross-tab tables, and key histograms beyond the discipline breakdown.

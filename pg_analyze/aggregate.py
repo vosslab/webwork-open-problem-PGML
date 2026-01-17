@@ -1,5 +1,6 @@
 # Standard Library
 import heapq
+import os
 
 # Local modules
 import pg_analyze.discipline
@@ -44,6 +45,47 @@ def count_bucket(count: int) -> str:
 
 #============================================
 
+def _bucket_percentile(hist: dict[str, int], *, percentile: float) -> str:
+	"""
+	Return a bucket label at a percentile based on a binned histogram.
+
+	This reports the first bucket where cumulative count >= percentile.
+	"""
+	order = ["0", "1", "2", "3", "4", "5-9", "10-19", "20+"]
+	total = sum(int(v) for v in hist.values() if isinstance(v, int))
+	if total <= 0:
+		return ""
+	target = max(1, int(total * percentile))
+	cum = 0
+	for b in order:
+		cum += int(hist.get(b, 0) or 0)
+		if cum >= target:
+			return b
+	return order[-1]
+
+
+def _duplicate_stats(counts: dict[str, int]) -> dict[str, int]:
+	unique = len(counts)
+	dup_groups = 0
+	dup_files = 0
+	max_group = 0
+	for c in counts.values():
+		if c <= 1:
+			continue
+		dup_groups += 1
+		dup_files += c
+		if c > max_group:
+			max_group = c
+	return {
+		"unique": unique,
+		"dup_groups": dup_groups,
+		"dup_files": dup_files,
+		"max_group": max_group,
+	}
+
+
+#============================================
+
 
 def reasons_to_text(reasons: list[dict]) -> str:
 	parts: list[str] = []
@@ -63,6 +105,18 @@ def reasons_to_text(reasons: list[dict]) -> str:
 
 def _inc(counter: dict[str, int], key: str, amount: int = 1) -> None:
 	counter[key] = counter.get(key, 0) + amount
+
+
+#============================================
+
+def _path_prefix(path: str, *, depth: int) -> str:
+	if not isinstance(path, str) or not path:
+		return ""
+	p = path.replace(os.sep, "/")
+	parts = [x for x in p.split("/") if x and x != "."]
+	if not parts:
+		return ""
+	return "/".join(parts[: max(1, depth)])
 
 
 #============================================
@@ -219,27 +273,66 @@ class Aggregator:
 	def __init__(self, *, needs_review_limit: int = 200, out_dir: str | None = None):
 		self.total_files = 0
 		self.matchlist_files = 0
+
 		self.files_with_dbsubject = 0
+		self.files_with_dbsubject_nonblank = 0
 		self.dbsubject_lines_total = 0
 		self.dbsubject_lines_blank = 0
+		self.dbsubject_lines_changed_by_normalization = 0
+		self.dbsubject_raw_distinct: set[str] = set()
+		self.dbsubject_norm_distinct: set[str] = set()
+
+		self.files_with_dbchapter = 0
+		self.files_with_dbchapter_nonblank = 0
+		self.dbchapter_lines_total = 0
+		self.dbchapter_lines_blank = 0
+		self.dbchapter_lines_changed_by_normalization = 0
+		self.dbchapter_raw_distinct: set[str] = set()
+		self.dbchapter_norm_distinct: set[str] = set()
+
+		self.files_with_dbsection = 0
+		self.files_with_dbsection_nonblank = 0
+		self.dbsection_lines_total = 0
+		self.dbsection_lines_blank = 0
+		self.dbsection_lines_changed_by_normalization = 0
+		self.dbsection_raw_distinct: set[str] = set()
+		self.dbsection_norm_distinct: set[str] = set()
+
 		self.discipline_line_counts: dict[str, int] = {d: 0 for d in pg_analyze.discipline.DISCIPLINES}
-		self.discipline_subject_counts: dict[tuple[str, str], int] = {}
+		self.discipline_subject_counts: dict[tuple[str, str, str], int] = {}
 		self.discipline_primary_subject_counts: dict[tuple[str, str], int] = {}
 		self.discipline_sample_files: dict[str, list[tuple[str, str]]] = {}
 		self._chem_hint_rows: list[tuple[str, int, str, str]] = []
 		self._bio_hint_rows: list[tuple[str, int, str, str]] = []
 		self._chem_hint_cap = 200
 		self._bio_hint_cap = 200
+		self.chem_files_with_hit = 0
+		self.bio_files_with_hit = 0
+		self.chem_term_counts: dict[str, int] = {}
+		self.bio_term_counts: dict[str, int] = {}
+		self.chem_prefix_counts: dict[str, int] = {}
+		self.bio_prefix_counts: dict[str, int] = {}
 
 		self.type_counts: dict[str, int] = {}
 		self.confidence_bins: dict[str, int] = {}
 		self.macro_counts: dict[str, int] = {}
 		self.widget_counts: dict[str, int] = {}
+		self.widget_file_counts: dict[str, int] = {}
 		self.evaluator_counts: dict[str, int] = {}
 		self.input_hist: dict[str, int] = {}
+		self.multipart_input_hist: dict[str, int] = {}
 		self.ans_hist: dict[str, int] = {}
 		self.pgml_blank_hist: dict[str, int] = {}
 		self.other_pgml_blank_hist: dict[str, int] = {}
+		self.type_by_eval_coverage: dict[tuple[str, str], int] = {}
+
+		self.path_top_counts: dict[str, int] = {}
+		self.files_with_resources = 0
+		self.resource_ext_counts: dict[str, int] = {}
+		self.files_with_randomization = 0
+
+		self._sha256_counts: dict[str, int] = {}
+		self._sha256_ws_counts: dict[str, int] = {}
 
 		self.other_breakdown: dict[str, int] = {}
 		self.macro_counts_other: dict[str, int] = {}
@@ -299,6 +392,11 @@ class Aggregator:
 			self.matchlist_files += 1
 
 		self._add_discipline(record)
+		self._add_path_provenance(record)
+		self._add_resources(record)
+		self._add_randomization(record)
+		self._add_duplicates(record)
+		self._add_content_hint_summaries(record)
 
 		types = record.get("types", [])
 		confidence = record.get("confidence", 0.0)
@@ -324,6 +422,7 @@ class Aggregator:
 				if isinstance(macro, str):
 					_inc(self.macro_counts, macro)
 
+		self._add_widget_file_counts(record)
 		if isinstance(widget_kinds, list):
 			for kind in widget_kinds:
 				if isinstance(kind, str):
@@ -336,6 +435,9 @@ class Aggregator:
 
 		if isinstance(input_count, int):
 			_inc(self.input_hist, count_bucket(input_count))
+
+		if isinstance(types, list) and ("multipart" in types) and isinstance(input_count, int):
+			_inc(self.multipart_input_hist, count_bucket(input_count))
 
 		if isinstance(ans_count, int):
 			_inc(self.ans_hist, count_bucket(ans_count))
@@ -392,18 +494,46 @@ class Aggregator:
 			eval_set = ["none"]
 
 		has_widgets = not (len(widget_set) == 1 and widget_set[0] == "none")
+		eval_cov = self._eval_coverage_bucket(record)
 
 		for t in type_set:
 			for w in widget_set:
 				self.type_by_widget[(t, w)] = self.type_by_widget.get((t, w), 0) + 1
 			for e in eval_set:
 				self.type_by_evaluator[(t, e)] = self.type_by_evaluator.get((t, e), 0) + 1
+			self.type_by_eval_coverage[(t, eval_cov)] = self.type_by_eval_coverage.get((t, eval_cov), 0) + 1
 
 		for w in widget_set:
 			for e in eval_set:
 				self.widget_by_evaluator[(w, e)] = self.widget_by_evaluator.get((w, e), 0) + 1
 
 		self._add_coverage(record, has_widgets=has_widgets)
+
+	def _add_widget_file_counts(self, record: dict) -> None:
+		widgets = record.get("widget_kinds", [])
+		if not isinstance(widgets, list) or not widgets:
+			_inc(self.widget_file_counts, "none")
+			return
+		kind_set = {w for w in widgets if isinstance(w, str) and w}
+		if not kind_set:
+			_inc(self.widget_file_counts, "none")
+			return
+		for k in sorted(kind_set):
+			_inc(self.widget_file_counts, k)
+
+	def _eval_coverage_bucket(self, record: dict) -> str:
+		ans_call_count = int(record.get("ans_call_evaluator_count", 0) or 0)
+		pgml_payload_count = int(record.get("pgml_payload_evaluator_count", 0) or 0)
+		pgml_star_spec_count = int(record.get("pgml_star_spec_evaluator_count", 0) or 0)
+		pgml_count = pgml_payload_count + pgml_star_spec_count
+
+		if ans_call_count > 0 and pgml_count > 0:
+			return "both"
+		if ans_call_count > 0:
+			return "ans_only"
+		if pgml_count > 0:
+			return "pgml_only"
+		return "none"
 
 	def _add_coverage(self, record: dict, *, has_widgets: bool) -> None:
 		ans_call_count = int(record.get("ans_call_evaluator_count", 0) or 0)
@@ -629,36 +759,101 @@ class Aggregator:
 		return out
 
 	def _add_discipline(self, record: dict) -> None:
-		subjects = record.get("dbsubjects", [])
-		if not isinstance(subjects, list):
-			subjects = []
+		dbsubject_pairs = record.get("dbsubject_pairs", [])
+		if not isinstance(dbsubject_pairs, list):
+			dbsubject_pairs = []
 
-		lines_total = int(record.get("dbsubject_lines_total", 0) or 0)
+		lines_total = int(record.get("dbsubject_lines_total", len(dbsubject_pairs)) or 0)
 		lines_blank = int(record.get("dbsubject_lines_blank", 0) or 0)
 		has_dbsubject = int(record.get("has_dbsubject", 0) or 0) > 0
+		has_dbsubject_nonblank = int(record.get("has_dbsubject_nonblank", 0) or 0) > 0
 
 		if has_dbsubject:
 			self.files_with_dbsubject += 1
+		if has_dbsubject_nonblank:
+			self.files_with_dbsubject_nonblank += 1
 		self.dbsubject_lines_total += lines_total
 		self.dbsubject_lines_blank += lines_blank
 
-		for s in subjects:
-			if not isinstance(s, str):
+		for item in dbsubject_pairs:
+			if not (isinstance(item, tuple) and len(item) == 2):
 				continue
-			subject = s.strip()
-			discipline = pg_analyze.discipline.bucket_subject(subject)
+			raw, norm = item
+			if not isinstance(raw, str) or not isinstance(norm, str):
+				continue
+			raw2 = raw.strip()
+			norm2 = norm.strip()
+			self.dbsubject_raw_distinct.add(raw2)
+			self.dbsubject_norm_distinct.add(norm2)
+			if raw2 != norm2:
+				self.dbsubject_lines_changed_by_normalization += 1
+
+			discipline = pg_analyze.discipline.bucket_subject(norm2)
 			if discipline not in self.discipline_line_counts:
 				discipline = "other"
 			self.discipline_line_counts[discipline] += 1
-			key = (discipline, subject)
+			key = (discipline, raw2, norm2)
 			self.discipline_subject_counts[key] = self.discipline_subject_counts.get(key, 0) + 1
+
+		dbchapter_pairs = record.get("dbchapter_pairs", [])
+		if not isinstance(dbchapter_pairs, list):
+			dbchapter_pairs = []
+		dbchapter_total = int(record.get("dbchapter_lines_total", len(dbchapter_pairs)) or 0)
+		dbchapter_blank = int(record.get("dbchapter_lines_blank", 0) or 0)
+		has_dbchapter = int(record.get("has_dbchapter", 0) or 0) > 0
+		has_dbchapter_nonblank = int(record.get("has_dbchapter_nonblank", 0) or 0) > 0
+		if has_dbchapter:
+			self.files_with_dbchapter += 1
+		if has_dbchapter_nonblank:
+			self.files_with_dbchapter_nonblank += 1
+		self.dbchapter_lines_total += dbchapter_total
+		self.dbchapter_lines_blank += dbchapter_blank
+		for item in dbchapter_pairs:
+			if not (isinstance(item, tuple) and len(item) == 2):
+				continue
+			raw, norm = item
+			if not isinstance(raw, str) or not isinstance(norm, str):
+				continue
+			raw2 = raw.strip()
+			norm2 = norm.strip()
+			self.dbchapter_raw_distinct.add(raw2)
+			self.dbchapter_norm_distinct.add(norm2)
+			if raw2 != norm2:
+				self.dbchapter_lines_changed_by_normalization += 1
+
+		dbsection_pairs = record.get("dbsection_pairs", [])
+		if not isinstance(dbsection_pairs, list):
+			dbsection_pairs = []
+		dbsection_total = int(record.get("dbsection_lines_total", len(dbsection_pairs)) or 0)
+		dbsection_blank = int(record.get("dbsection_lines_blank", 0) or 0)
+		has_dbsection = int(record.get("has_dbsection", 0) or 0) > 0
+		has_dbsection_nonblank = int(record.get("has_dbsection_nonblank", 0) or 0) > 0
+		if has_dbsection:
+			self.files_with_dbsection += 1
+		if has_dbsection_nonblank:
+			self.files_with_dbsection_nonblank += 1
+		self.dbsection_lines_total += dbsection_total
+		self.dbsection_lines_blank += dbsection_blank
+		for item in dbsection_pairs:
+			if not (isinstance(item, tuple) and len(item) == 2):
+				continue
+			raw, norm = item
+			if not isinstance(raw, str) or not isinstance(norm, str):
+				continue
+			raw2 = raw.strip()
+			norm2 = norm.strip()
+			self.dbsection_raw_distinct.add(raw2)
+			self.dbsection_norm_distinct.add(norm2)
+			if raw2 != norm2:
+				self.dbsection_lines_changed_by_normalization += 1
 
 		primary = record.get("discipline_primary", "other")
 		if not isinstance(primary, str) or not primary:
 			primary = "other"
 		if primary not in self.discipline_line_counts:
 			primary = "other"
-		primary_subject = record.get("discipline_primary_subject", "")
+
+		primary_subject = record.get("discipline_primary_subject_raw", "")
 		if not isinstance(primary_subject, str):
 			primary_subject = ""
 		primary_subject = primary_subject.strip()
@@ -700,6 +895,56 @@ class Aggregator:
 			if isinstance(term, str) and isinstance(line, int) and isinstance(snippet, str):
 				self._bio_hint_rows.append((file_path, line, term, snippet))
 
+	def _add_path_provenance(self, record: dict) -> None:
+		rel = record.get("file_rel", "")
+		if not isinstance(rel, str) or not rel:
+			return
+		rel2 = rel.replace(os.sep, "/")
+		parts = [p for p in rel2.split("/") if p and p != "."]
+		if not parts:
+			return
+		_inc(self.path_top_counts, parts[0])
+
+	def _add_resources(self, record: dict) -> None:
+		exts = record.get("resource_exts", [])
+		if not isinstance(exts, list) or not exts:
+			return
+		self.files_with_resources += 1
+		for ext in sorted({e for e in exts if isinstance(e, str) and e}):
+			_inc(self.resource_ext_counts, ext)
+
+	def _add_randomization(self, record: dict) -> None:
+		if int(record.get("has_randomization", 0) or 0) > 0:
+			self.files_with_randomization += 1
+
+	def _add_duplicates(self, record: dict) -> None:
+		h = record.get("sha256")
+		if isinstance(h, str) and h:
+			self._sha256_counts[h] = self._sha256_counts.get(h, 0) + 1
+		h2 = record.get("sha256_ws")
+		if isinstance(h2, str) and h2:
+			self._sha256_ws_counts[h2] = self._sha256_ws_counts.get(h2, 0) + 1
+
+	def _add_content_hint_summaries(self, record: dict) -> None:
+		rel = record.get("file_rel", "")
+		prefix = _path_prefix(rel, depth=2)
+
+		chem_terms = record.get("chem_terms_present", [])
+		if isinstance(chem_terms, list) and any(isinstance(t, str) and t for t in chem_terms):
+			self.chem_files_with_hit += 1
+			if prefix:
+				_inc(self.chem_prefix_counts, prefix)
+			for t in sorted({t for t in chem_terms if isinstance(t, str) and t}):
+				_inc(self.chem_term_counts, t)
+
+		bio_terms = record.get("bio_terms_present", [])
+		if isinstance(bio_terms, list) and any(isinstance(t, str) and t for t in bio_terms):
+			self.bio_files_with_hit += 1
+			if prefix:
+				_inc(self.bio_prefix_counts, prefix)
+			for t in sorted({t for t in bio_terms if isinstance(t, str) and t}):
+				_inc(self.bio_term_counts, t)
+
 	def _render_discipline_counts_tsv(self) -> str:
 		lines: list[str] = ["discipline\tcount"]
 		for d in pg_analyze.discipline.DISCIPLINES:
@@ -707,20 +952,28 @@ class Aggregator:
 		return "\n".join(lines) + "\n"
 
 	def _render_discipline_subject_counts_tsv(self, *, top_n: int) -> str:
-		lines: list[str] = ["discipline\tsubject_raw\tcount"]
+		lines: list[str] = ["discipline\tsubject_raw\tsubject_norm\tcount"]
 		for d in pg_analyze.discipline.DISCIPLINES:
-			items = [(subject, count) for (disc, subject), count in self.discipline_subject_counts.items() if disc == d]
-			items_sorted = sorted(items, key=lambda x: (-x[1], x[0]))[:top_n]
-			for subject, count in items_sorted:
-				lines.append(f"{d}\t{subject}\t{count}")
+			items = [
+				(raw, norm, count)
+				for (disc, raw, norm), count in self.discipline_subject_counts.items()
+				if disc == d
+			]
+			items_sorted = sorted(items, key=lambda x: (-x[2], x[0], x[1]))[:top_n]
+			for raw, norm, count in items_sorted:
+				lines.append(f"{d}\t{raw}\t{norm}\t{count}")
 		return "\n".join(lines) + "\n"
 
 	def _render_discipline_unclassified_subject_counts_tsv(self, *, top_n: int) -> str:
-		lines: list[str] = ["subject_raw\tcount"]
-		items = [(subject, count) for (disc, subject), count in self.discipline_subject_counts.items() if disc == "other"]
-		items_sorted = sorted(items, key=lambda x: (-x[1], x[0]))[:top_n]
-		for subject, count in items_sorted:
-			lines.append(f"{subject}\t{count}")
+		lines: list[str] = ["subject_raw\tsubject_norm\tcount"]
+		items = [
+			(raw, norm, count)
+			for (disc, raw, norm), count in self.discipline_subject_counts.items()
+			if disc == "other"
+		]
+		items_sorted = sorted(items, key=lambda x: (-x[2], x[0], x[1]))[:top_n]
+		for raw, norm, count in items_sorted:
+			lines.append(f"{raw}\t{norm}\t{count}")
 		return "\n".join(lines) + "\n"
 
 	def _render_discipline_samples_tsv(self, *, per_bucket: int) -> str:
@@ -744,9 +997,29 @@ class Aggregator:
 		lines: list[str] = ["metric\tcount"]
 		lines.append(f"files_total\t{files_total}")
 		lines.append(f"files_with_dbsubject\t{files_with}")
+		lines.append(f"files_with_dbsubject_nonblank\t{self.files_with_dbsubject_nonblank}")
 		lines.append(f"files_without_dbsubject\t{files_without}")
 		lines.append(f"dbsubject_lines_total\t{self.dbsubject_lines_total}")
 		lines.append(f"dbsubject_lines_blank\t{self.dbsubject_lines_blank}")
+		lines.append(f"dbsubject_lines_changed_by_normalization\t{self.dbsubject_lines_changed_by_normalization}")
+		lines.append(f"dbsubject_raw_distinct\t{len(self.dbsubject_raw_distinct)}")
+		lines.append(f"dbsubject_norm_distinct\t{len(self.dbsubject_norm_distinct)}")
+
+		lines.append(f"files_with_dbchapter\t{self.files_with_dbchapter}")
+		lines.append(f"files_with_dbchapter_nonblank\t{self.files_with_dbchapter_nonblank}")
+		lines.append(f"dbchapter_lines_total\t{self.dbchapter_lines_total}")
+		lines.append(f"dbchapter_lines_blank\t{self.dbchapter_lines_blank}")
+		lines.append(f"dbchapter_lines_changed_by_normalization\t{self.dbchapter_lines_changed_by_normalization}")
+		lines.append(f"dbchapter_raw_distinct\t{len(self.dbchapter_raw_distinct)}")
+		lines.append(f"dbchapter_norm_distinct\t{len(self.dbchapter_norm_distinct)}")
+
+		lines.append(f"files_with_dbsection\t{self.files_with_dbsection}")
+		lines.append(f"files_with_dbsection_nonblank\t{self.files_with_dbsection_nonblank}")
+		lines.append(f"dbsection_lines_total\t{self.dbsection_lines_total}")
+		lines.append(f"dbsection_lines_blank\t{self.dbsection_lines_blank}")
+		lines.append(f"dbsection_lines_changed_by_normalization\t{self.dbsection_lines_changed_by_normalization}")
+		lines.append(f"dbsection_raw_distinct\t{len(self.dbsection_raw_distinct)}")
+		lines.append(f"dbsection_norm_distinct\t{len(self.dbsection_norm_distinct)}")
 		return "\n".join(lines) + "\n"
 
 	def _render_corpus_profile_tsv(self) -> str:
@@ -766,11 +1039,34 @@ class Aggregator:
 
 		lines: list[str] = ["metric\tvalue"]
 		lines.append(f"total_files\t{self.total_files}")
+		lines.append(f"files_with_dbsubject\t{self.files_with_dbsubject}")
+		lines.append(f"files_with_dbsubject_nonblank\t{self.files_with_dbsubject_nonblank}")
+		lines.append(f"files_with_dbchapter\t{self.files_with_dbchapter}")
+		lines.append(f"files_with_dbchapter_nonblank\t{self.files_with_dbchapter_nonblank}")
+		lines.append(f"files_with_dbsection\t{self.files_with_dbsection}")
+		lines.append(f"files_with_dbsection_nonblank\t{self.files_with_dbsection_nonblank}")
 
 		for macro in key_macros:
 			lines.append(f"macro_files:{macro}\t{self.macro_counts.get(macro, 0)}")
 
 		lines.append(f"token_files:MatchList\t{self.matchlist_files}")
+		lines.append(f"files_with_resources\t{self.files_with_resources}")
+		lines.append(f"files_with_randomization\t{self.files_with_randomization}")
+
+		lines.append(f"input_count_p50_bucket\t{_bucket_percentile(self.input_hist, percentile=0.50)}")
+		lines.append(f"input_count_p90_bucket\t{_bucket_percentile(self.input_hist, percentile=0.90)}")
+		lines.append(f"input_count_p99_bucket\t{_bucket_percentile(self.input_hist, percentile=0.99)}")
+
+		exact = _duplicate_stats(self._sha256_counts)
+		ws = _duplicate_stats(self._sha256_ws_counts)
+		lines.append(f"sha256_unique\t{exact['unique']}")
+		lines.append(f"sha256_dup_groups\t{exact['dup_groups']}")
+		lines.append(f"sha256_dup_files\t{exact['dup_files']}")
+		lines.append(f"sha256_max_group\t{exact['max_group']}")
+		lines.append(f"sha256_ws_unique\t{ws['unique']}")
+		lines.append(f"sha256_ws_dup_groups\t{ws['dup_groups']}")
+		lines.append(f"sha256_ws_dup_files\t{ws['dup_files']}")
+		lines.append(f"sha256_ws_max_group\t{ws['max_group']}")
 		return "\n".join(lines) + "\n"
 
 	def _render_counts_all_tsv(self) -> str:
@@ -780,10 +1076,64 @@ class Aggregator:
 		rows.extend([("evaluator_kind", "pgml_payload_only", k, v) for k, v in self.pgml_payload_evaluator_counts.items()])
 		rows.extend([("evaluator_kind", "pgml_star_spec_only", k, v) for k, v in self.pgml_star_spec_evaluator_counts.items()])
 		rows.extend([("widget_kind", "all", k, v) for k, v in self.widget_counts.items()])
+		rows.extend([("widget_kind_file", "all", k, v) for k, v in self.widget_file_counts.items()])
 		rows.extend([("macro_load", "all", k, v) for k, v in self.macro_counts.items()])
 		rows.extend([("type", "all", k, v) for k, v in self.type_counts.items()])
 		rows.extend([("evaluator_source", "all", k, v) for k, v in self.evaluator_source_counts.items()])
 		rows.extend([("subtype_tag", "all", k, v) for k, v in self.subtype_tag_counts.items()])
+		rows.extend([("path_top", "all", k, v) for k, v in self.path_top_counts.items()])
+
+		rows.extend(
+			[
+				("db_tag_file", "all", "dbsubject_line", self.files_with_dbsubject),
+				("db_tag_file", "all", "dbsubject_nonblank", self.files_with_dbsubject_nonblank),
+				("db_tag_file", "all", "dbchapter_line", self.files_with_dbchapter),
+				("db_tag_file", "all", "dbchapter_nonblank", self.files_with_dbchapter_nonblank),
+				("db_tag_file", "all", "dbsection_line", self.files_with_dbsection),
+				("db_tag_file", "all", "dbsection_nonblank", self.files_with_dbsection_nonblank),
+				("db_tag_lines", "all", "dbsubject", self.dbsubject_lines_total),
+				("db_tag_lines", "all", "dbchapter", self.dbchapter_lines_total),
+				("db_tag_lines", "all", "dbsection", self.dbsection_lines_total),
+				("db_tag_blank_lines", "all", "dbsubject", self.dbsubject_lines_blank),
+				("db_tag_blank_lines", "all", "dbchapter", self.dbchapter_lines_blank),
+				("db_tag_blank_lines", "all", "dbsection", self.dbsection_lines_blank),
+				("db_tag_distinct_raw", "all", "dbsubject", len(self.dbsubject_raw_distinct)),
+				("db_tag_distinct_raw", "all", "dbchapter", len(self.dbchapter_raw_distinct)),
+				("db_tag_distinct_raw", "all", "dbsection", len(self.dbsection_raw_distinct)),
+				("db_tag_distinct_norm", "all", "dbsubject", len(self.dbsubject_norm_distinct)),
+				("db_tag_distinct_norm", "all", "dbchapter", len(self.dbchapter_norm_distinct)),
+				("db_tag_distinct_norm", "all", "dbsection", len(self.dbsection_norm_distinct)),
+				("db_tag_changed_lines", "all", "dbsubject", self.dbsubject_lines_changed_by_normalization),
+				("db_tag_changed_lines", "all", "dbchapter", self.dbchapter_lines_changed_by_normalization),
+				("db_tag_changed_lines", "all", "dbsection", self.dbsection_lines_changed_by_normalization),
+			]
+		)
+
+		rows.append(("resource_file", "all", "has_resources", self.files_with_resources))
+		rows.extend([("resource_ext", "all", k, v) for k, v in self.resource_ext_counts.items()])
+		rows.append(("randomization_file", "all", "has_randomization", self.files_with_randomization))
+
+		exact = _duplicate_stats(self._sha256_counts)
+		ws = _duplicate_stats(self._sha256_ws_counts)
+		rows.extend(
+			[
+				("duplicate", "all", "sha256_unique", exact["unique"]),
+				("duplicate", "all", "sha256_dup_groups", exact["dup_groups"]),
+				("duplicate", "all", "sha256_dup_files", exact["dup_files"]),
+				("duplicate", "all", "sha256_max_group", exact["max_group"]),
+				("duplicate", "all", "sha256_ws_unique", ws["unique"]),
+				("duplicate", "all", "sha256_ws_dup_groups", ws["dup_groups"]),
+				("duplicate", "all", "sha256_ws_dup_files", ws["dup_files"]),
+				("duplicate", "all", "sha256_ws_max_group", ws["max_group"]),
+			]
+		)
+
+		rows.append(("content_hint_files", "chem", "files_with_hit", self.chem_files_with_hit))
+		rows.append(("content_hint_files", "bio", "files_with_hit", self.bio_files_with_hit))
+		rows.extend([("content_hint_term", "chem", k, v) for k, v in self.chem_term_counts.items()])
+		rows.extend([("content_hint_term", "bio", k, v) for k, v in self.bio_term_counts.items()])
+		rows.extend([("content_hint_prefix", "chem", k, v) for k, v in self.chem_prefix_counts.items()])
+		rows.extend([("content_hint_prefix", "bio", k, v) for k, v in self.bio_prefix_counts.items()])
 
 		return _render_long_counts_tsv(rows)
 
@@ -792,12 +1142,14 @@ class Aggregator:
 		rows.extend([("type", "widget_kind", a, b, c) for (a, b), c in self.type_by_widget.items()])
 		rows.extend([("type", "evaluator_kind", a, b, c) for (a, b), c in self.type_by_evaluator.items()])
 		rows.extend([("type", "evaluator_source", a, b, c) for (a, b), c in self.type_by_evaluator_source.items()])
+		rows.extend([("type", "evaluator_coverage", a, b, c) for (a, b), c in self.type_by_eval_coverage.items()])
 		rows.extend([("widget_kind", "evaluator_kind", a, b, c) for (a, b), c in self.widget_by_evaluator.items()])
 		return _render_long_cross_tabs_tsv(rows)
 
 	def _render_histograms_all_tsv(self) -> str:
 		rows: list[tuple[str, str, int]] = []
 		rows.extend([("input_count", k, v) for k, v in self.input_hist.items()])
+		rows.extend([("input_count_multipart", k, v) for k, v in self.multipart_input_hist.items()])
 		rows.extend([("ans_count", k, v) for k, v in self.ans_hist.items()])
 		rows.extend([("pgml_blank_marker_count", k, v) for k, v in self.pgml_blank_hist.items()])
 		rows.extend([("ans_token_count", k, v) for k, v in self.ans_token_hist.items()])
