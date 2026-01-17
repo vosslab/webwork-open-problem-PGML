@@ -9,3 +9,5 @@
 - Reorganize `pg_analyze/` modules by merging scan/schema into `main.py`, merging reporting into `report.py`, and merging macro extraction into `extract_evaluators.py` without changing behavior.
 - Convert heredoc tokenizer checks to pytest in `tests/test_tokenize_heredoc_comments.py`.
 - Fix `pytest tests/` import path for `tests/test_tokenize_heredoc_comments.py` by explicitly adding the repo root to `sys.path`.
+- Refactor `pg_analyze` to produce aggregate TSV reports by default (no per-file JSON), with optional `--per-file-tsv` and `--jsonl-out`, and add aggregation tests in `tests/test_pg_analyze_aggregate.py`.
+- Update hygiene scripts/tests to skip missing tracked files when running in a working tree with unstaged deletions (`tests/test_indentation.py`, `tests/run_pyflakes.sh`).

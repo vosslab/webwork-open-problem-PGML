@@ -2,25 +2,20 @@
 
 # Standard Library
 import argparse
+import json
 import os
 
 # Local modules
+import pg_analyze.aggregate
 import pg_analyze.classify
 import pg_analyze.extract_answers
 import pg_analyze.extract_evaluators
 import pg_analyze.extract_widgets
-import pg_analyze.report
 import pg_analyze.tokenize
 import pg_analyze.wire_inputs
 
 
 #============================================
-
-JSON_SCHEMA_VERSION = 2
-
-
-#============================================
-
 
 def main() -> None:
 	args = parse_args()
@@ -28,21 +23,41 @@ def main() -> None:
 	roots = _default_roots(args.roots)
 	pg_files = scan_pg_files(roots)
 
-	json_rows: list[dict] = []
-	needs_review_paths: list[str] = []
+	os.makedirs(args.out_dir, exist_ok=True)
+	aggregator = pg_analyze.aggregate.Aggregator(needs_review_limit=200)
 
-	for file_path in pg_files:
-		report, needs_review = analyze_file(file_path)
-		if args.json_out_dir:
-			pg_analyze.report.write_report_json(args.json_out_dir, file_path, report)
+	per_file_handle = None
+	if args.per_file_tsv:
+		out_dir = os.path.dirname(args.per_file_tsv)
+		if out_dir:
+			os.makedirs(out_dir, exist_ok=True)
+		per_file_handle = open(args.per_file_tsv, "w", encoding="utf-8")
+		per_file_handle.write("\t".join(_per_file_header()) + "\n")
 
-		row = build_tsv_row(report=report, needs_review=needs_review)
-		json_rows.append(row)
-		if needs_review:
-			needs_review_paths.append(file_path)
+	jsonl_handle = None
+	if args.jsonl_out:
+		out_dir = os.path.dirname(args.jsonl_out)
+		if out_dir:
+			os.makedirs(out_dir, exist_ok=True)
+		jsonl_handle = open(args.jsonl_out, "w", encoding="utf-8")
 
-	pg_analyze.report.write_tsv(args.tsv_out_file, json_rows)
-	_write_needs_review(args.needs_review_file, needs_review_paths)
+	try:
+		for file_path in pg_files:
+			record = analyze_file(file_path)
+			aggregator.add_record(record)
+
+			if per_file_handle is not None:
+				per_file_handle.write("\t".join(_per_file_row(record)) + "\n")
+
+			if jsonl_handle is not None:
+				jsonl_handle.write(json.dumps(record, ensure_ascii=True, sort_keys=True) + "\n")
+	finally:
+		if per_file_handle is not None:
+			per_file_handle.close()
+		if jsonl_handle is not None:
+			jsonl_handle.close()
+
+	write_reports(args.out_dir, aggregator)
 
 
 #============================================
@@ -60,25 +75,23 @@ def parse_args() -> argparse.Namespace:
 		help="Roots to scan for .pg files (default: OpenProblemLibrary Contrib Pending, if present).",
 	)
 	parser.add_argument(
-		"-j",
-		"--json-out",
-		dest="json_out_dir",
-		default="output/pg_analyze/json",
-		help="Directory for per-file JSON output.",
+		"-o",
+		"--out-dir",
+		dest="out_dir",
+		required=True,
+		help="Directory to write aggregate TSV reports.",
 	)
 	parser.add_argument(
-		"-t",
-		"--tsv-out",
-		dest="tsv_out_file",
-		default="output/pg_analyze/summary.tsv",
-		help="Path for TSV summary output.",
+		"--per-file-tsv",
+		dest="per_file_tsv",
+		default="",
+		help="Optional path to write the full per-file TSV (off by default).",
 	)
 	parser.add_argument(
-		"-n",
-		"--needs-review",
-		dest="needs_review_file",
-		default="output/pg_analyze/needs_review.txt",
-		help="Path for needs_review list output.",
+		"--jsonl-out",
+		dest="jsonl_out",
+		default="",
+		help="Optional path to write JSONL per-file records (off by default).",
 	)
 
 	return parser.parse_args()
@@ -123,73 +136,56 @@ def scan_pg_files(roots: list[str]) -> list[str]:
 #============================================
 
 
-def analyze_file(file_path: str) -> tuple[dict, bool]:
+def analyze_file(file_path: str) -> dict:
 	text = _read_text_latin1(file_path)
+	return analyze_text(text=text, file_path=file_path)
+
+def analyze_text(*, text: str, file_path: str) -> dict:
 	stripped = pg_analyze.tokenize.strip_comments(text)
 	newlines = pg_analyze.tokenize.build_newline_index(stripped)
 
 	macros = pg_analyze.extract_evaluators.extract_macros(stripped, newlines=newlines)
-	widgets, pgml_info = pg_analyze.extract_widgets.extract(stripped, newlines=newlines)
+	widgets, _pgml_info = pg_analyze.extract_widgets.extract(stripped, newlines=newlines)
 	answers = pg_analyze.extract_answers.extract(stripped, newlines=newlines)
 	evaluators = pg_analyze.extract_evaluators.extract(stripped, newlines=newlines)
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
 
 	report = {
-		"schema_version": JSON_SCHEMA_VERSION,
 		"file": file_path,
 		"macros": macros,
 		"widgets": widgets,
 		"evaluators": evaluators,
 		"answers": answers,
 		"wiring": wiring,
-		"pgml": pgml_info,
+		"pgml": _pgml_info,
 	}
 
-	labels, needs_review = pg_analyze.classify.classify(report)
-	report["labels"] = labels
-
-	return report, needs_review
-
-
-#============================================
-
-
-def build_tsv_row(*, report: dict, needs_review: bool) -> dict:
-	widgets = report.get("widgets", [])
-	evaluators = report.get("evaluators", [])
-	macros = report.get("macros", {})
-	labels = report.get("labels", {})
+	labels, _ = pg_analyze.classify.classify(report)
 
 	widget_kinds = sorted({w.get("kind") for w in widgets if isinstance(w.get("kind"), str)})
 	evaluator_kinds = sorted({e.get("kind") for e in evaluators if isinstance(e.get("kind"), str)})
-
 	input_count = sum(1 for w in widgets if w.get("kind") in {"blank", "popup", "radio", "checkbox", "matching", "ordering"})
 	ans_count = len(evaluators)
+	wiring_empty = len(wiring) == 0
+	confidence = float(labels.get("confidence", 0.0))
+	types = labels.get("types", [])
+	reasons = labels.get("reasons", [])
+
+	needs_review = (confidence < 0.55) or ((ans_count >= 2) and wiring_empty)
 
 	return {
-		"file": report.get("file", ""),
-		"needs_review": str(needs_review).lower(),
-		"confidence": labels.get("confidence", 0.0),
-		"types": ",".join(labels.get("types", [])),
+		"file": file_path,
+		"types": types,
+		"confidence": confidence,
+		"needs_review": needs_review,
 		"input_count": input_count,
 		"ans_count": ans_count,
-		"widget_kinds": ",".join(widget_kinds),
-		"evaluator_kinds": ",".join(evaluator_kinds),
-		"loadMacros": ",".join(macros.get("loadMacros", [])),
-		"includePGproblem": ",".join(macros.get("includePGproblem", [])),
+		"widget_kinds": widget_kinds,
+		"evaluator_kinds": evaluator_kinds,
+		"loadMacros": macros.get("loadMacros", []),
+		"reasons": reasons,
+		"wiring_empty": wiring_empty,
 	}
-
-
-#============================================
-
-
-def _write_needs_review(path: str, files: list[str]) -> None:
-	out_dir = os.path.dirname(path)
-	if out_dir:
-		os.makedirs(out_dir, exist_ok=True)
-	with open(path, "w", encoding="utf-8") as f:
-		for p in files:
-			f.write(p + "\n")
 
 
 #============================================
@@ -198,6 +194,51 @@ def _write_needs_review(path: str, files: list[str]) -> None:
 def _read_text_latin1(path: str) -> str:
 	with open(path, "r", encoding="latin-1") as f:
 		return f.read()
+
+
+#============================================
+
+
+def _per_file_header() -> list[str]:
+	return [
+		"file",
+		"needs_review",
+		"confidence",
+		"types",
+		"input_count",
+		"ans_count",
+		"widget_kinds",
+		"evaluator_kinds",
+		"loadMacros",
+	]
+
+
+#============================================
+
+
+def _per_file_row(record: dict) -> list[str]:
+	return [
+		str(record.get("file", "")),
+		str(bool(record.get("needs_review", False))).lower(),
+		f"{float(record.get('confidence', 0.0)):.2f}",
+		",".join(record.get("types", [])),
+		str(int(record.get("input_count", 0))),
+		str(int(record.get("ans_count", 0))),
+		",".join(record.get("widget_kinds", [])),
+		",".join(record.get("evaluator_kinds", [])),
+		",".join(record.get("loadMacros", [])),
+	]
+
+
+#============================================
+
+
+def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> None:
+	reports = aggregator.render_reports()
+	for filename, content in reports.items():
+		path = os.path.join(out_dir, filename)
+		with open(path, "w", encoding="utf-8") as f:
+			f.write(content)
 
 
 #============================================
