@@ -1,6 +1,8 @@
 # Standard Library
 import re
 
+import pg_analyze.tokenize
+
 
 CTOR_NAMES = (
 	"Real",
@@ -21,7 +23,7 @@ ASSIGN_RX = re.compile(
 #============================================
 
 
-def extract(stripped_text: str) -> list[dict]:
+def extract(stripped_text: str, *, newlines: list[int]) -> list[dict]:
 	answers: list[dict] = []
 	for m in ASSIGN_RX.finditer(stripped_text):
 		var = m.group(1)
@@ -29,7 +31,7 @@ def extract(stripped_text: str) -> list[dict]:
 		ctor_start = m.start(2)
 		paren_open = m.end() - 1
 		paren_close = _find_matching_paren(stripped_text, paren_open)
-		line = stripped_text.count("\n", 0, ctor_start) + 1
+		line = pg_analyze.tokenize.pos_to_line(newlines, ctor_start)
 		expr = stripped_text[ctor_start : paren_close + 1]
 		answers.append(
 			{

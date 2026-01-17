@@ -17,7 +17,7 @@ def classify(report: dict) -> tuple[dict, bool]:
 	pgml = report.get("pgml", {})
 
 	types: list[str] = []
-	reasons: list[str] = []
+	reasons: list[dict] = []
 
 	load_macros = macros.get("loadMacros", [])
 
@@ -33,28 +33,31 @@ def classify(report: dict) -> tuple[dict, bool]:
 	input_count = sum(1 for w in widgets if w.get("kind") in {"blank", "popup", "radio", "checkbox", "matching", "ordering"})
 	ans_count = len(evaluators)
 
+	def add_reason(kind: str, value: str) -> None:
+		reasons.append({"kind": kind, "value": value})
+
 	if widget_kind_counts.get("radio", 0) > 0 or "parserRadioButtons.pl" in load_macros:
 		types.append("multiple_choice")
 		if "parserRadioButtons.pl" in load_macros:
-			reasons.append("macro:parserRadioButtons.pl")
+			add_reason("macro", "parserRadioButtons.pl")
 		if widget_kind_counts.get("radio", 0) > 0:
-			reasons.append("widget:radio")
+			add_reason("widget", "radio")
 
 	if widget_kind_counts.get("matching", 0) > 0:
 		types.append("matching")
-		reasons.append("widget:matching")
+		add_reason("widget", "matching")
 
 	if widget_kind_counts.get("ordering", 0) > 0:
 		types.append("ordering")
-		reasons.append("widget:ordering")
+		add_reason("widget", "ordering")
 
 	if input_count >= 2 or ans_count >= 2:
 		types.append("multipart")
-		reasons.append("count:multipart")
+		add_reason("count", "multipart")
 
 	if eval_kind_counts.get("str_cmp", 0) > 0 or ctor_counts.get("String", 0) > 0:
 		types.append("fib_word")
-		reasons.append("evaluator_or_ctor:string")
+		add_reason("evaluator_or_ctor", "string")
 
 	if (
 		eval_kind_counts.get("num_cmp", 0) > 0
@@ -64,11 +67,11 @@ def classify(report: dict) -> tuple[dict, bool]:
 		or ctor_counts.get("Compute", 0) > 0
 	):
 		types.append("numeric_entry")
-		reasons.append("evaluator_or_ctor:numeric")
+		add_reason("evaluator_or_ctor", "numeric")
 
 	if not types:
 		types = ["other"]
-		reasons.append("no_signals")
+		add_reason("other", "no_signals")
 
 	confidence = _confidence(types=types, reasons=reasons, widgets=widgets, evaluators=evaluators, wiring=wiring, pgml=pgml)
 	needs_review = (confidence < 0.55) or ((not wiring) and (ans_count >= 2))
@@ -88,7 +91,7 @@ def classify(report: dict) -> tuple[dict, bool]:
 def _confidence(
 	*,
 	types: list[str],
-	reasons: list[str],
+	reasons: list[dict],
 	widgets: list[dict],
 	evaluators: list[dict],
 	wiring: list[dict],
@@ -96,10 +99,11 @@ def _confidence(
 ) -> float:
 	score = 0.2
 
-	if any(r.startswith("macro:") for r in reasons) and any(r.startswith("widget:") for r in reasons):
+	kinds = {r.get("kind") for r in reasons if isinstance(r, dict)}
+	if ("macro" in kinds) and ("widget" in kinds):
 		score += 0.4
 
-	if any(r.startswith("evaluator_or_ctor:") for r in reasons):
+	if "evaluator_or_ctor" in kinds:
 		score += 0.2
 
 	if wiring:
@@ -115,4 +119,3 @@ def _confidence(
 		score = 0.95
 
 	return round(score, 2)
-

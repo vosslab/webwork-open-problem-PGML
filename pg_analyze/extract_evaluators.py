@@ -15,9 +15,9 @@ VAR_RX = re.compile(r"\$([A-Za-z_]\w*)")
 #============================================
 
 
-def extract(stripped_text: str) -> list[dict]:
+def extract(stripped_text: str, *, newlines: list[int]) -> list[dict]:
 	evaluators: list[dict] = []
-	calls = pg_analyze.tokenize.iter_calls(stripped_text, EVALUATOR_CALL_NAMES)
+	calls = pg_analyze.tokenize.iter_calls(stripped_text, EVALUATOR_CALL_NAMES, newlines=newlines)
 	for call in calls:
 		expr = _normalize_ws(call.arg_text)
 		evaluators.append(

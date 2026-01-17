@@ -16,11 +16,11 @@ FILENAME_RX = re.compile(r"""['"]([^'"]+\.(?:pl|pg))['"]""")
 #============================================
 
 
-def extract(stripped_text: str) -> dict:
+def extract(stripped_text: str, *, newlines: list[int]) -> dict:
 	"""
 	Extract macro usage from stripped (comment-free) text.
 	"""
-	calls = pg_analyze.tokenize.iter_calls(stripped_text, MACRO_CALL_NAMES)
+	calls = pg_analyze.tokenize.iter_calls(stripped_text, MACRO_CALL_NAMES, newlines=newlines)
 
 	load_macros: list[str] = []
 	include_pgproblem: list[str] = []

@@ -100,11 +100,12 @@ def _default_roots(roots: list[str]) -> list[str]:
 def analyze_file(file_path: str) -> tuple[dict, bool]:
 	text = _read_text_latin1(file_path)
 	stripped = pg_analyze.tokenize.strip_comments(text)
+	newlines = pg_analyze.tokenize.build_newline_index(stripped)
 
-	macros = pg_analyze.extract_macros.extract(stripped)
-	widgets, pgml_info = pg_analyze.extract_widgets.extract(stripped)
-	answers = pg_analyze.extract_answers.extract(stripped)
-	evaluators = pg_analyze.extract_evaluators.extract(stripped)
+	macros = pg_analyze.extract_macros.extract(stripped, newlines=newlines)
+	widgets, pgml_info = pg_analyze.extract_widgets.extract(stripped, newlines=newlines)
+	answers = pg_analyze.extract_answers.extract(stripped, newlines=newlines)
+	evaluators = pg_analyze.extract_evaluators.extract(stripped, newlines=newlines)
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
 
 	report = {

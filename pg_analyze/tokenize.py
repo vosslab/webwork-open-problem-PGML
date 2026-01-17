@@ -1,4 +1,5 @@
 # Standard Library
+import bisect
 import dataclasses
 import re
 
@@ -15,69 +16,217 @@ class Call:
 #============================================
 
 
-def strip_comments(text: str) -> str:
+def build_newline_index(text: str) -> list[int]:
 	"""
-	Remove Perl line comments, preserving strings.
+	Return sorted positions of '\n' characters.
+	"""
+	newlines: list[int] = []
+	pos = text.find("\n")
+	while pos != -1:
+		newlines.append(pos)
+		pos = text.find("\n", pos + 1)
+	return newlines
+
+
+#============================================
+
+
+def pos_to_line(newlines: list[int], pos: int) -> int:
+	"""
+	Map a byte offset to 1-based line number using a newline index.
+	"""
+	return bisect.bisect_left(newlines, pos) + 1
+
+
+#============================================
+
+
+_POD_START_RX = re.compile(r"(?m)^(?:=pod|=head\d|=begin|=item|=over|=for)\b")
+_POD_CUT_RX = re.compile(r"(?m)^=cut\b")
+
+
+def strip_pod_blocks(text: str) -> str:
+	"""
+	Remove POD blocks while preserving line count.
 	"""
 	out: list[str] = []
-	in_sq = False
-	in_dq = False
-	escape = False
 	i = 0
-	while i < len(text):
-		ch = text[i]
-		if escape:
-			out.append(ch)
-			escape = False
-			i += 1
-			continue
-		if ch == "\\":
-			out.append(ch)
-			escape = True
-			i += 1
-			continue
-		if (not in_dq) and (ch == "'") and (not in_sq):
-			in_sq = True
-			out.append(ch)
-			i += 1
-			continue
-		if in_sq and ch == "'":
-			in_sq = False
-			out.append(ch)
-			i += 1
-			continue
-		if (not in_sq) and (ch == '"') and (not in_dq):
-			in_dq = True
-			out.append(ch)
-			i += 1
-			continue
-		if in_dq and ch == '"':
-			in_dq = False
-			out.append(ch)
-			i += 1
-			continue
-		if (not in_sq) and (not in_dq) and ch == "#":
-			while i < len(text) and text[i] != "\n":
-				i += 1
-			out.append("\n")
-			i += 1
-			continue
-		out.append(ch)
-		i += 1
+	while True:
+		m = _POD_START_RX.search(text, i)
+		if not m:
+			out.append(text[i:])
+			break
+
+		out.append(text[i:m.start()])
+		cut = _POD_CUT_RX.search(text, m.end())
+		if not cut:
+			pod_lines = text[m.start():].count("\n")
+			out.append("\n" * pod_lines)
+			break
+
+		cut_line_end = text.find("\n", cut.end())
+		if cut_line_end == -1:
+			cut_span_end = len(text)
+		else:
+			cut_span_end = cut_line_end + 1
+
+		pod_lines = text[m.start():cut_span_end].count("\n")
+		out.append("\n" * pod_lines)
+		i = cut_span_end
+
 	return "".join(out)
 
 
 #============================================
 
 
-def _line_number(text: str, pos: int) -> int:
-	return text.count("\n", 0, pos) + 1
+def strip_comments(text: str) -> str:
+	"""
+	Remove Perl line comments, preserving strings, POD, and heredocs.
+	"""
+	text = strip_pod_blocks(text)
+
+	out_lines: list[str] = []
+	heredoc_end: str | None = None
+
+	for line in text.splitlines(keepends=True):
+		if heredoc_end is not None:
+			out_lines.append(line)
+			if line.strip() == heredoc_end:
+				heredoc_end = None
+			continue
+
+		heredoc_end = _scan_heredoc_terminator(line)
+		out_lines.append(_strip_line_comment_preserving_strings(line))
+
+	return "".join(out_lines)
 
 
 #============================================
 
 
-def iter_calls(text: str, names: set[str]) -> list[Call]:
+def _scan_heredoc_terminator(line: str) -> str | None:
+	"""
+	Detect a heredoc introducer outside of strings and return its terminator token.
+	"""
+	in_sq = False
+	in_dq = False
+	escape = False
+
+	i = 0
+	while i < len(line) - 1:
+		ch = line[i]
+		if escape:
+			escape = False
+			i += 1
+			continue
+		if ch == "\\":
+			escape = True
+			i += 1
+			continue
+		if (not in_dq) and (ch == "'") and (not in_sq):
+			in_sq = True
+			i += 1
+			continue
+		if in_sq and ch == "'":
+			in_sq = False
+			i += 1
+			continue
+		if (not in_sq) and (ch == '"') and (not in_dq):
+			in_dq = True
+			i += 1
+			continue
+		if in_dq and ch == '"':
+			in_dq = False
+			i += 1
+			continue
+
+		if (not in_sq) and (not in_dq) and (ch == "<") and (line[i + 1] == "<"):
+			j = i + 2
+			while j < len(line) and line[j].isspace():
+				j += 1
+			if j >= len(line):
+				return None
+
+			if line[j] in ("'", '"'):
+				quote = line[j]
+				j += 1
+				start = j
+				while j < len(line) and line[j] != quote:
+					j += 1
+				if j >= len(line):
+					return None
+				return line[start:j]
+
+			start = j
+			if not (line[j].isalpha() or line[j] == "_"):
+				return None
+			j += 1
+			while j < len(line) and (line[j].isalnum() or line[j] == "_"):
+				j += 1
+			return line[start:j]
+
+		i += 1
+
+	return None
+
+
+#============================================
+
+
+def _strip_line_comment_preserving_strings(line: str) -> str:
+	in_sq = False
+	in_dq = False
+	escape = False
+	for i, ch in enumerate(line):
+		if escape:
+			escape = False
+			continue
+		if ch == "\\":
+			escape = True
+			continue
+		if (not in_dq) and (ch == "'") and (not in_sq):
+			in_sq = True
+			continue
+		if in_sq and ch == "'":
+			in_sq = False
+			continue
+		if (not in_sq) and (ch == '"') and (not in_dq):
+			in_dq = True
+			continue
+		if in_dq and ch == '"':
+			in_dq = False
+			continue
+		if (not in_sq) and (not in_dq) and ch == "#":
+			return line[:i] + ("\n" if line.endswith("\n") else "")
+	return line
+
+
+#============================================
+
+
+def _compile_name_rx(names: set[str]) -> re.Pattern:
+	cache_key = frozenset(names)
+	cached = _NAME_RX_CACHE.get(cache_key)
+	if cached is not None:
+		return cached
+
+	parts: list[str] = []
+	for name in sorted(names):
+		parts.append(re.escape(name))
+	pat = r"(?:" + "|".join(parts) + r")"
+	compiled = re.compile(r"(?<!\w)" + pat + r"(?!\w)")
+	_NAME_RX_CACHE[cache_key] = compiled
+	return compiled
+
+
+_NAME_RX_CACHE: dict[frozenset[str], re.Pattern] = {}
+
+
+#============================================
+
+
+def iter_calls(text: str, names: set[str], newlines: list[int] | None = None) -> list[Call]:
 	"""
 	Find function-like calls name(...) with balanced parentheses.
 	Assumes comments already stripped.
@@ -85,7 +234,10 @@ def iter_calls(text: str, names: set[str]) -> list[Call]:
 	if not names:
 		return []
 
-	name_rx = re.compile(r"\b(" + "|".join(re.escape(n) for n in sorted(names)) + r")\b")
+	if newlines is None:
+		newlines = build_newline_index(text)
+
+	name_rx = _compile_name_rx(names)
 	calls: list[Call] = []
 	i = 0
 	while True:
@@ -93,7 +245,7 @@ def iter_calls(text: str, names: set[str]) -> list[Call]:
 		if not m:
 			break
 
-		name = m.group(1)
+		name = m.group(0)
 		j = m.end()
 		while j < len(text) and text[j].isspace():
 			j += 1
@@ -147,7 +299,7 @@ def iter_calls(text: str, names: set[str]) -> list[Call]:
 								arg_text=arg_text,
 								start=m.start(),
 								end=k + 1,
-								line=_line_number(text, m.start()),
+								line=pos_to_line(newlines, m.start()),
 							)
 						)
 						i = k + 1

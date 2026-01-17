@@ -28,9 +28,7 @@ WIDGET_CALL_NAMES = {
 
 NAME_RX = re.compile(r"""['"]([^'"]+)['"]""")
 
-PGML_BEGIN_RX = re.compile(r"^[ \t]*BEGIN_PGML\b", re.MULTILINE)
-PGML_END_RX = re.compile(r"^[ \t]*END_PGML\b", re.MULTILINE)
-PGML_BLANK_RX = re.compile(r"\[[^\]]*_{1,}[^\]]*\]\s*\{")
+PGML_BLANK_RX = re.compile(r"\[[ \t]*_+[ \t]*\]")
 
 
 #============================================
@@ -79,12 +77,12 @@ def _extract_assignment_name(text: str, call: pg_analyze.tokenize.Call) -> str |
 #============================================
 
 
-def extract(stripped_text: str) -> tuple[list[dict], dict]:
+def extract(stripped_text: str, *, newlines: list[int]) -> tuple[list[dict], dict]:
 	"""
 	Return (widgets, pgml_info).
 	"""
 	widgets: list[dict] = []
-	calls = pg_analyze.tokenize.iter_calls(stripped_text, WIDGET_CALL_NAMES)
+	calls = pg_analyze.tokenize.iter_calls(stripped_text, WIDGET_CALL_NAMES, newlines=newlines)
 	for call in calls:
 		name = _extract_named_rule(call)
 		if name is None:
@@ -98,32 +96,57 @@ def extract(stripped_text: str) -> tuple[list[dict], dict]:
 			}
 		)
 
-	pgml_info = _extract_pgml_info(stripped_text)
+	pgml_info = _extract_pgml_info(stripped_text, newlines=newlines)
 	return widgets, pgml_info
 
 
 #============================================
 
 
-def _extract_pgml_info(stripped_text: str) -> dict:
-	begin_m = PGML_BEGIN_RX.search(stripped_text)
-	end_m = PGML_END_RX.search(stripped_text)
-	has_pgml = bool(begin_m and end_m and begin_m.start() < end_m.start())
+def _extract_pgml_info(stripped_text: str, *, newlines: list[int]) -> dict:
+	blocks = _extract_pgml_blocks(stripped_text)
 
 	blank_count = 0
 	first_blank_line: int | None = None
-	if has_pgml:
-		begin_index = begin_m.end()
-		end_index = end_m.start()
-		pgml_block = stripped_text[begin_index:end_index]
-		blank_matches = list(PGML_BLANK_RX.finditer(pgml_block))
-		blank_count = len(blank_matches)
-		if blank_matches:
-			first_blank_pos = begin_index + blank_matches[0].start()
-			first_blank_line = stripped_text.count("\n", 0, first_blank_pos) + 1
+	for start, end in blocks:
+		block_text = stripped_text[start:end]
+		for m in PGML_BLANK_RX.finditer(block_text):
+			blank_count += 1
+			if first_blank_line is None:
+				first_blank_line = pg_analyze.tokenize.pos_to_line(newlines, start + m.start())
 
 	return {
-		"has_pgml_block": has_pgml,
+		"has_pgml_block": bool(blocks),
 		"blank_count": blank_count,
 		"first_blank_line": first_blank_line,
+		"block_count": len(blocks),
 	}
+
+
+#============================================
+
+
+def _extract_pgml_blocks(stripped_text: str) -> list[tuple[int, int]]:
+	"""
+	Return a list of (start, end) spans containing PGML block content.
+	"""
+	blocks: list[tuple[int, int]] = []
+	stack: list[tuple[str, int]] = []
+
+	for m in re.finditer(r"(?m)^[ \t]*(BEGIN|END)_PGML(?:_(SOLUTION|HINT))?\b", stripped_text):
+		kind = m.group(1)
+		suffix = m.group(2) or ""
+		tag = f"PGML_{suffix}" if suffix else "PGML"
+
+		if kind == "BEGIN":
+			stack.append((tag, m.end()))
+			continue
+
+		if kind == "END":
+			if not stack:
+				continue
+			open_tag, open_pos = stack.pop()
+			if open_pos < m.start():
+				blocks.append((open_pos, m.start()))
+
+	return blocks
