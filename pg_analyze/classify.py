@@ -20,6 +20,7 @@ def classify(report: dict) -> tuple[dict, bool]:
 	reasons: list[dict] = []
 
 	load_macros = macros.get("loadMacros", [])
+	has_multianswer = bool(report.get("has_multianswer", False))
 
 	widget_kinds = [w.get("kind") for w in widgets if isinstance(w.get("kind"), str)]
 	widget_kind_counts = collections.Counter(widget_kinds)
@@ -54,6 +55,14 @@ def classify(report: dict) -> tuple[dict, bool]:
 	if input_count >= 2 or ans_count >= 2:
 		types.append("multipart")
 		add_reason("count", "multipart")
+
+	if ("parserMultiAnswer.pl" in load_macros) or has_multianswer:
+		if "multipart" not in types:
+			types.append("multipart")
+		if "parserMultiAnswer.pl" in load_macros:
+			add_reason("macro", "parserMultiAnswer.pl")
+		if has_multianswer:
+			add_reason("multianswer", "MultiAnswer")
 
 	if eval_kind_counts.get("str_cmp", 0) > 0 or ctor_counts.get("String", 0) > 0:
 		types.append("fib_word")

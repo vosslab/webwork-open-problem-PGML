@@ -1,9 +1,4 @@
 # Standard Library
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
 # Local modules
 import pg_analyze.aggregate
 import pg_analyze.main
@@ -71,11 +66,11 @@ def test_aggregate_reports_from_synthetic_pg_like_strings() -> None:
 	assert macro_counts["parserRadioButtons.pl"] == 1
 
 	widget_counts = _parse_counts_tsv(reports["widget_counts.tsv"])
-	assert widget_counts["blank"] == 2
+	assert widget_counts["blank"] == 3
 	assert widget_counts["radio"] == 1
 
 	eval_counts = _parse_counts_tsv(reports["evaluator_counts.tsv"])
-	assert eval_counts["cmp"] == 3
+	assert eval_counts["cmp"] == 4
 
 	input_hist = _parse_counts_tsv(reports["input_count_hist.tsv"])
 	assert input_hist["1"] == 2

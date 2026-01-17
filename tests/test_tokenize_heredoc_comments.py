@@ -1,12 +1,7 @@
 # Standard Library
-import os
-import sys
-
 import pytest
 
 # Local modules
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
 import pg_analyze.tokenize
 
 

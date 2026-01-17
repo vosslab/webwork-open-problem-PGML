@@ -2,8 +2,8 @@
 
 # Standard Library
 import argparse
-import json
 import os
+import re
 
 # Local modules
 import pg_analyze.aggregate
@@ -26,36 +26,9 @@ def main() -> None:
 	os.makedirs(args.out_dir, exist_ok=True)
 	aggregator = pg_analyze.aggregate.Aggregator(needs_review_limit=200)
 
-	per_file_handle = None
-	if args.per_file_tsv:
-		out_dir = os.path.dirname(args.per_file_tsv)
-		if out_dir:
-			os.makedirs(out_dir, exist_ok=True)
-		per_file_handle = open(args.per_file_tsv, "w", encoding="utf-8")
-		per_file_handle.write("\t".join(_per_file_header()) + "\n")
-
-	jsonl_handle = None
-	if args.jsonl_out:
-		out_dir = os.path.dirname(args.jsonl_out)
-		if out_dir:
-			os.makedirs(out_dir, exist_ok=True)
-		jsonl_handle = open(args.jsonl_out, "w", encoding="utf-8")
-
-	try:
-		for file_path in pg_files:
-			record = analyze_file(file_path)
-			aggregator.add_record(record)
-
-			if per_file_handle is not None:
-				per_file_handle.write("\t".join(_per_file_row(record)) + "\n")
-
-			if jsonl_handle is not None:
-				jsonl_handle.write(json.dumps(record, ensure_ascii=True, sort_keys=True) + "\n")
-	finally:
-		if per_file_handle is not None:
-			per_file_handle.close()
-		if jsonl_handle is not None:
-			jsonl_handle.close()
+	for file_path in pg_files:
+		record = analyze_file(file_path)
+		aggregator.add_record(record)
 
 	write_reports(args.out_dir, aggregator)
 
@@ -80,18 +53,6 @@ def parse_args() -> argparse.Namespace:
 		dest="out_dir",
 		required=True,
 		help="Directory to write aggregate TSV reports.",
-	)
-	parser.add_argument(
-		"--per-file-tsv",
-		dest="per_file_tsv",
-		default="",
-		help="Optional path to write the full per-file TSV (off by default).",
-	)
-	parser.add_argument(
-		"--jsonl-out",
-		dest="jsonl_out",
-		default="",
-		help="Optional path to write JSONL per-file records (off by default).",
 	)
 
 	return parser.parse_args()
@@ -149,6 +110,7 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 	answers = pg_analyze.extract_answers.extract(stripped, newlines=newlines)
 	evaluators = pg_analyze.extract_evaluators.extract(stripped, newlines=newlines)
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
+	has_multianswer = bool(_MULTIANSWER_RX.search(stripped))
 
 	report = {
 		"file": file_path,
@@ -158,18 +120,24 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"answers": answers,
 		"wiring": wiring,
 		"pgml": _pgml_info,
+		"has_multianswer": has_multianswer,
 	}
 
 	labels, _ = pg_analyze.classify.classify(report)
 
-	widget_kinds = sorted({w.get("kind") for w in widgets if isinstance(w.get("kind"), str)})
-	evaluator_kinds = sorted({e.get("kind") for e in evaluators if isinstance(e.get("kind"), str)})
+	widget_kinds = [w.get("kind") for w in widgets if isinstance(w.get("kind"), str)]
+	evaluator_kinds = [e.get("kind") for e in evaluators if isinstance(e.get("kind"), str)]
 	input_count = sum(1 for w in widgets if w.get("kind") in {"blank", "popup", "radio", "checkbox", "matching", "ordering"})
 	ans_count = len(evaluators)
 	wiring_empty = len(wiring) == 0
 	confidence = float(labels.get("confidence", 0.0))
 	types = labels.get("types", [])
 	reasons = labels.get("reasons", [])
+
+	pgml_blank_count = int(_pgml_info.get("blank_count", 0) or 0)
+	if pgml_blank_count > 0:
+		widget_kinds.extend(["pgml_blank"] * pgml_blank_count)
+		input_count += pgml_blank_count
 
 	needs_review = (confidence < 0.55) or ((ans_count >= 2) and wiring_empty)
 
@@ -185,6 +153,7 @@ def analyze_text(*, text: str, file_path: str) -> dict:
 		"loadMacros": macros.get("loadMacros", []),
 		"reasons": reasons,
 		"wiring_empty": wiring_empty,
+		"has_multianswer": has_multianswer,
 	}
 
 
@@ -195,41 +164,6 @@ def _read_text_latin1(path: str) -> str:
 	with open(path, "r", encoding="latin-1") as f:
 		return f.read()
 
-
-#============================================
-
-
-def _per_file_header() -> list[str]:
-	return [
-		"file",
-		"needs_review",
-		"confidence",
-		"types",
-		"input_count",
-		"ans_count",
-		"widget_kinds",
-		"evaluator_kinds",
-		"loadMacros",
-	]
-
-
-#============================================
-
-
-def _per_file_row(record: dict) -> list[str]:
-	return [
-		str(record.get("file", "")),
-		str(bool(record.get("needs_review", False))).lower(),
-		f"{float(record.get('confidence', 0.0)):.2f}",
-		",".join(record.get("types", [])),
-		str(int(record.get("input_count", 0))),
-		str(int(record.get("ans_count", 0))),
-		",".join(record.get("widget_kinds", [])),
-		",".join(record.get("evaluator_kinds", [])),
-		",".join(record.get("loadMacros", [])),
-	]
-
-
 #============================================
 
 
@@ -239,6 +173,12 @@ def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> 
 		path = os.path.join(out_dir, filename)
 		with open(path, "w", encoding="utf-8") as f:
 			f.write(content)
+
+
+#============================================
+
+
+_MULTIANSWER_RX = re.compile(r"\bMultiAnswer\s*\(")
 
 
 #============================================

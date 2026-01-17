@@ -11,3 +11,6 @@
 - Fix `pytest tests/` import path for `tests/test_tokenize_heredoc_comments.py` by explicitly adding the repo root to `sys.path`.
 - Refactor `pg_analyze` to produce aggregate TSV reports by default (no per-file JSON), with optional `--per-file-tsv` and `--jsonl-out`, and add aggregation tests in `tests/test_pg_analyze_aggregate.py`.
 - Update hygiene scripts/tests to skip missing tracked files when running in a working tree with unstaged deletions (`tests/test_indentation.py`, `tests/run_pyflakes.sh`).
+- Add `tests/conftest.py` to put the repo root on `sys.path` for pytest.
+- Remove per-file output options from `pg_analyze` (no per-file TSV/JSONL) to keep default behavior corpus-scale.
+- Add regression tests for common PG/PGML patterns (heredocs, multiline ANS, MultiAnswer, PGML blanks) and count PGML blanks as inputs.
