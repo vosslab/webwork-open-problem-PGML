@@ -5,6 +5,8 @@ import sys
 import random
 import argparse
 import subprocess
+import shutil
+import tempfile
 
 
 EXTENSIONS = {
@@ -436,12 +438,16 @@ def main() -> int:
 	ascii_out = os.path.join(repo_root, "ascii_compliance.txt")
 	pyflakes_out = os.path.join(repo_root, "pyflakes.txt")
 	script_path = os.path.join(repo_root, "tests", "check_ascii_compliance.py")
+	ascii_tmp_fd, ascii_tmp_path = tempfile.mkstemp(prefix="ascii_compliance_", suffix=".txt")
+	os.close(ascii_tmp_fd)
 
 	if not os.path.isfile(script_path):
 		print(f"Missing script: {script_path}", file=sys.stderr)
+		if os.path.exists(ascii_tmp_path):
+			os.remove(ascii_tmp_path)
 		return 1
 
-	with open(ascii_out, "w", encoding="utf-8"):
+	with open(ascii_tmp_path, "w", encoding="utf-8"):
 		pass
 
 	scope = resolve_scope(args.scope)
@@ -451,13 +457,21 @@ def main() -> int:
 			print("Falling back to full scan after git errors.", file=sys.stderr)
 			files, had_error = gather_files(repo_root, ascii_out, pyflakes_out)
 			if had_error:
+				if os.path.exists(ascii_tmp_path):
+					os.remove(ascii_tmp_path)
 				return 1
 	else:
 		files, had_error = gather_files(repo_root, ascii_out, pyflakes_out)
 		if had_error:
+			if os.path.exists(ascii_tmp_path):
+				os.remove(ascii_tmp_path)
 			return 1
 	if not files:
 		print("No files matched the requested scope.")
+		if os.path.exists(ascii_out):
+			os.remove(ascii_out)
+		if os.path.exists(ascii_tmp_path):
+			os.remove(ascii_tmp_path)
 		return 0
 
 	colors = get_progress_colors()
@@ -468,7 +482,7 @@ def main() -> int:
 	if progress_enabled:
 		print(f"ascii_compliance: scanning {len(files)} files...", file=sys.stderr)
 
-	with open(ascii_out, "a", encoding="utf-8") as ascii_handle:
+	with open(ascii_tmp_path, "a", encoding="utf-8") as ascii_handle:
 		for index, file_path in enumerate(files, start=1):
 			status = 0
 			result = subprocess.run(
@@ -489,12 +503,20 @@ def main() -> int:
 		sys.stderr.write("\n")
 		sys.stderr.flush()
 
-	with open(ascii_out, "r", encoding="utf-8") as handle:
+	with open(ascii_tmp_path, "r", encoding="utf-8") as handle:
 		all_lines = [line.rstrip("\n") for line in handle]
 
 	if not all_lines:
+		if os.path.exists(ascii_out):
+			os.remove(ascii_out)
+		if os.path.exists(ascii_tmp_path):
+			os.remove(ascii_tmp_path)
 		print("No errors found!!!")
 		return 0
+
+	if os.path.exists(ascii_out):
+		os.remove(ascii_out)
+	shutil.move(ascii_tmp_path, ascii_out)
 
 	error_lines = [line for line in all_lines if ERROR_RE.search(line)]
 
