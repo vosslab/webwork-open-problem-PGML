@@ -23,12 +23,12 @@ def test_bucket_lists_write_paths_once_per_bucket(tmp_path: Path) -> None:
 	finally:
 		writers.close()
 
-	assert (tmp_path / "type" / "numeric_entry_files.txt").read_text(encoding="utf-8") == "a.pg\n"
-	assert (tmp_path / "type" / "other_files.txt").read_text(encoding="utf-8") == "b.pg\n"
-	assert (tmp_path / "type" / "multipart_files.txt").read_text(encoding="utf-8") == "b.pg\n"
+	assert (tmp_path / "lists" / "type" / "numeric_entry_files.txt").read_text(encoding="utf-8") == "a.pg\n"
+	assert (tmp_path / "lists" / "type" / "other_files.txt").read_text(encoding="utf-8") == "b.pg\n"
+	assert (tmp_path / "lists" / "type" / "multipart_files.txt").read_text(encoding="utf-8") == "b.pg\n"
 
-	assert (tmp_path / "widget" / "blank_files.txt").read_text(encoding="utf-8") == "a.pg\n"
-	assert (tmp_path / "widget" / "none_files.txt").read_text(encoding="utf-8") == "b.pg\n"
+	assert (tmp_path / "lists" / "widget" / "blank_files.txt").read_text(encoding="utf-8") == "a.pg\n"
+	assert (tmp_path / "lists" / "widget" / "none_files.txt").read_text(encoding="utf-8") == "b.pg\n"
 
-	assert (tmp_path / "evaluator" / "cmp_files.txt").read_text(encoding="utf-8") == "a.pg\n"
-	assert (tmp_path / "evaluator" / "none_files.txt").read_text(encoding="utf-8") == "b.pg\n"
+	assert (tmp_path / "lists" / "evaluator" / "cmp_files.txt").read_text(encoding="utf-8") == "a.pg\n"
+	assert (tmp_path / "lists" / "evaluator" / "none_files.txt").read_text(encoding="utf-8") == "b.pg\n"

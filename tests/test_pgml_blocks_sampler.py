@@ -23,7 +23,7 @@ def test_pgml_blocks_sample_written_and_capped(tmp_path: Path) -> None:
 	finally:
 		agg.close()
 
-	out = (tmp_path / "pgml_blocks_sample.txt").read_text(encoding="utf-8")
+	out = (tmp_path / "diagnostics" / "pgml_blocks_sample.txt").read_text(encoding="utf-8")
 	assert "=== file=a.pg kind=BEGIN_PGML" in out
 	assert "Answer: [_]{Real(3)->cmp()}" in out
 	assert "=== END ===" in out

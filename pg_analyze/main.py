@@ -4,6 +4,8 @@
 import argparse
 import os
 import re
+import sys
+import time
 
 # Local modules
 import pg_analyze.aggregate
@@ -18,23 +20,50 @@ import pg_analyze.wire_inputs
 #============================================
 
 def main() -> None:
+	start = time.perf_counter()
 	args = parse_args()
 
 	roots = _default_roots(args.roots)
+	_log(f"pg_analyze: scanning roots: {', '.join(roots)}")
+	scan_start = time.perf_counter()
 	pg_files = scan_pg_files(roots)
+	_log(f"pg_analyze: found {len(pg_files)} .pg files in {time.perf_counter() - scan_start:.2f}s")
 
 	os.makedirs(args.out_dir, exist_ok=True)
+	out_dir_abs = os.path.abspath(args.out_dir)
 	aggregator = pg_analyze.aggregate.Aggregator(needs_review_limit=200, out_dir=args.out_dir)
 
 	try:
-		for file_path in pg_files:
+		_log("pg_analyze: analyzing files...")
+		last_progress = time.perf_counter()
+		for i, file_path in enumerate(pg_files, start=1):
 			text = _read_text_latin1(file_path)
 			record = analyze_text(text=text, file_path=file_path)
 			aggregator.add_record(record)
 			aggregator.add_pgml_blocks(record=record, text=text)
+			last_progress = _maybe_log_progress(last_progress, done=i, total=len(pg_files))
+		_log("pg_analyze: writing outputs...")
 		write_reports(args.out_dir, aggregator)
 	finally:
 		aggregator.close()
+
+	elapsed = time.perf_counter() - start
+	_log(f"pg_analyze: done in {elapsed:.2f}s; output is located at {out_dir_abs}")
+
+
+#============================================
+
+
+def _log(msg: str) -> None:
+	print(msg, file=sys.stderr, flush=True)
+
+
+def _maybe_log_progress(last_progress: float, *, done: int, total: int) -> float:
+	now = time.perf_counter()
+	if now - last_progress < 2.0:
+		return last_progress
+	_log(f"pg_analyze: processed {done}/{total} files...")
+	return now
 
 
 #============================================
@@ -221,9 +250,47 @@ def _read_text_latin1(path: str) -> str:
 def write_reports(out_dir: str, aggregator: pg_analyze.aggregate.Aggregator) -> None:
 	reports = aggregator.render_reports()
 	for filename, content in reports.items():
-		path = os.path.join(out_dir, filename)
+		rel_path = pg_analyze.aggregate.REPORT_PATHS.get(filename, os.path.join("summary", filename))
+		path = os.path.join(out_dir, rel_path)
+		parent = os.path.dirname(path)
+		if parent:
+			os.makedirs(parent, exist_ok=True)
 		with open(path, "w", encoding="utf-8") as f:
 			f.write(content)
+
+	_write_index(out_dir)
+
+
+def _write_index(out_dir: str) -> None:
+	lines = [
+		"pg_analyze output index",
+		"",
+		"Start here:",
+		"- summary/coverage.tsv",
+		"- summary/counts_by_type.tsv",
+		"- needs_review/needs_review_bucket_counts.tsv",
+		"",
+		"Then:",
+		"- summary/evaluator_source_counts.tsv",
+		"- counts/pgml_payload_evaluator_counts.tsv",
+		"",
+		"Then:",
+		"- cross_tabs/widget_by_evaluator.tsv",
+		"- cross_tabs/type_by_evaluator_source.tsv",
+		"",
+		"For tuning:",
+		"- macros/macro_counts_unknown_pgml_blank.tsv",
+		"- needs_review/evaluator_coverage_reasons.tsv",
+		"",
+		"For examples:",
+		"- diagnostics/pgml_blocks_sample.txt",
+		"- samples/*.tsv",
+		"",
+	]
+
+	path = os.path.join(out_dir, "INDEX.txt")
+	with open(path, "w", encoding="utf-8") as f:
+		f.write("\n".join(lines))
 
 
 #============================================

@@ -74,6 +74,56 @@ def _render_counts_tsv(rows: list[tuple[str, int]], *, key_name: str) -> str:
 
 #============================================
 
+REPORT_PATHS: dict[str, str] = {
+	# summary/
+	"counts_by_type.tsv": "summary/counts_by_type.tsv",
+	"confidence_bins.tsv": "summary/confidence_bins.tsv",
+	"coverage.tsv": "summary/coverage.tsv",
+	"evaluator_source_counts.tsv": "summary/evaluator_source_counts.tsv",
+
+	# counts/
+	"macro_counts.tsv": "counts/macro_counts.tsv",
+	"widget_counts.tsv": "counts/widget_counts.tsv",
+	"evaluator_counts.tsv": "counts/evaluator_counts.tsv",
+	"pgml_payload_evaluator_counts.tsv": "counts/pgml_payload_evaluator_counts.tsv",
+
+	# cross_tabs/
+	"type_by_widget.tsv": "cross_tabs/type_by_widget.tsv",
+	"type_by_evaluator.tsv": "cross_tabs/type_by_evaluator.tsv",
+	"type_by_evaluator_source.tsv": "cross_tabs/type_by_evaluator_source.tsv",
+	"widget_by_evaluator.tsv": "cross_tabs/widget_by_evaluator.tsv",
+
+	# histograms/
+	"input_count_hist.tsv": "histograms/input_count_hist.tsv",
+	"ans_count_hist.tsv": "histograms/ans_count_hist.tsv",
+	"ans_token_hist.tsv": "histograms/ans_token_hist.tsv",
+	"pgml_blank_marker_hist.tsv": "histograms/pgml_blank_marker_hist.tsv",
+	"other_pgml_blank_hist.tsv": "histograms/other_pgml_blank_hist.tsv",
+
+	# needs_review/
+	"needs_review.tsv": "needs_review/needs_review.tsv",
+	"needs_review_bucket_counts.tsv": "needs_review/needs_review_bucket_counts.tsv",
+	"needs_review_type_counts.tsv": "needs_review/needs_review_type_counts.tsv",
+	"needs_review_macro_counts.tsv": "needs_review/needs_review_macro_counts.tsv",
+	"evaluator_coverage_reasons.tsv": "needs_review/evaluator_coverage_reasons.tsv",
+
+	# macros/
+	"macro_counts_other.tsv": "macros/macro_counts_other.tsv",
+	"macro_counts_unknown_pgml_blank.tsv": "macros/macro_counts_unknown_pgml_blank.tsv",
+	"macro_counts_eval_none_numeric_entry.tsv": "macros/macro_counts_eval_none_numeric_entry.tsv",
+	"macro_counts_eval_none_multiple_choice.tsv": "macros/macro_counts_eval_none_multiple_choice.tsv",
+
+	# other/
+	"other_breakdown.tsv": "other/other_breakdown.tsv",
+	"other_samples.tsv": "other/other_samples.tsv",
+	"widget_counts_other.tsv": "other/widget_counts_other.tsv",
+	"evaluator_counts_other.tsv": "other/evaluator_counts_other.tsv",
+
+	# samples/
+	"samples_unknown_pgml_blank.tsv": "samples/samples_unknown_pgml_blank.tsv",
+	"samples_eval_none_numeric_entry.tsv": "samples/samples_eval_none_numeric_entry.tsv",
+}
+
 _STRONG_WIDGET_MACRO_SUBSTRINGS = (
 	"parserradiobuttons",
 	"parserpopup",
@@ -773,7 +823,9 @@ class BucketWriters:
 	"""
 
 	def __init__(self, out_dir: str):
-		self._base = out_dir
+		import os
+
+		self._base = os.path.join(out_dir, "lists")
 		self._handles: dict[tuple[str, str], object] = {}
 		self._ensure_dirs()
 
@@ -840,7 +892,8 @@ class PgmlBlockSampler:
 		self._max_chars = max_chars
 		self._count = 0
 
-		path = os.path.join(out_dir, "pgml_blocks_sample.txt")
+		path = os.path.join(out_dir, "diagnostics", "pgml_blocks_sample.txt")
+		os.makedirs(os.path.dirname(path), exist_ok=True)
 		self._fp = open(path, "w", encoding="utf-8")
 
 	def add(self, *, record: dict, text: str) -> None:

@@ -24,4 +24,5 @@
 - Add evaluator coverage instrumentation reports (`ans_token_hist.tsv`, `evaluator_coverage_reasons.tsv`) plus restricted macro counts and bounded samples to target missing evaluator detection in PGML-heavy files.
 - Extract evaluator payloads from PGML blanks (BEGIN/END blocks and PGML heredocs) and add evaluator-source reports (`evaluator_source_counts.tsv`, `pgml_payload_evaluator_counts.tsv`, `type_by_evaluator_source.tsv`) plus an updated `coverage.tsv` that distinguishes ANS vs PGML-derived evaluators.
 - Add a bounded diagnostic dump of raw PGML blocks for targeted buckets (`pgml_blocks_sample.txt`) to inspect PGML idioms without per-file output.
-- Ensure `pg_analyze` overwrites existing output files and keeps TSV outputs directly under `-o` (no additional report subfolders).
+- Ensure `pg_analyze` overwrites existing output files and writes outputs into a stable subfolder taxonomy under `-o` (plus an `INDEX.txt` reading order).
+- Add simple progress logging and elapsed-time summary to `pg_analyze` runs.
