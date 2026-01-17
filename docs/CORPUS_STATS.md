@@ -28,9 +28,13 @@ The most relevant reports for the tables below are:
 
 - `summary/corpus_profile.tsv`
 - `summary/counts_all.tsv`
+- `summary/macro_counts_segmented.tsv`
 - `summary/coverage_widgets_vs_evaluator_source.tsv`
+- `summary/cross_tabs_all.tsv`
+- `summary/histograms_all.tsv`
 - `summary/discipline_counts.tsv`
 - `summary/discipline_coverage.tsv`
+- `summary/duplicate_clusters_top.tsv`
 
 ## Snapshot date
 
@@ -501,8 +505,14 @@ These are counts of duplicate *groups* by group-size bucket (not counts of files
 
 This is a small sample of the largest duplicate clusters (one representative path per cluster):
 
-- Full OPL, sha256: group_size 16 (blankProblem.pg templates), group_size 12 (CityTech/OpenProblemLibrary duplicates)
-- PGML corpus (this fork), sha256: group_size 6 (Contrib/CCCS practice), group_size 3 (CCCS OpenStax-aligned files)
+| corpus | hash_type | group_size | representative_file |
+| --- | --- | ---: | --- |
+| Full OPL | sha256 | 16 | Contrib/BentleyUniversity/MathematicsOfComputerGraphics/setMoCG-Ch11/blankProblem.pg |
+| Full OPL | sha256 | 16 | Contrib/Mizzou/College_Algebra/Graphing_Linear/blankProblem.pg |
+| Full OPL | sha256 | 12 | Contrib/CUNY/CityTech/CollegeAlgebra_Trig/AddRationalExpressions/AddRationalExpressions.pg |
+| Full OPL | sha256_ws | 16 | Contrib/CUNY/CityTech/CollegeAlgebra_Trig/HigherRoots-Algebraic/HigherRoots-Algebraic.pg |
+| PGML corpus (this fork) | sha256 | 6 | Contrib/CCCS/AlgebraicLiteracy/Practice/Practice1.pg |
+| PGML corpus (this fork) | sha256_ws | 6 | Contrib/CCCS/CollegeAlgebra/6.3/CCD_CCCS_Openstax_AlgTrig_AT-1-001-AS_6_3_09.pg |
 
 ## Macro risk and units
 
@@ -557,6 +567,7 @@ The table below reports cheap file-level signals (outside strings/comments) for 
 | Full OPL | geogebra_token | 165 | 0.2% |
 | Full OPL | js_script_tag | 234 | 0.3% |
 | Full OPL | javascript_token | 282 | 0.4% |
+| Full OPL | applet_token | 2 | 0.0% |
 | PGML corpus (this fork) | image_call | 1,841 | 19.6% |
 | PGML corpus (this fork) | init_graph_call | 618 | 6.6% |
 | PGML corpus (this fork) | plot_functions_call | 61 | 0.6% |
