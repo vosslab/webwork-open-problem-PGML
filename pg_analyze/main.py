@@ -8,14 +8,15 @@ import os
 import pg_analyze.classify
 import pg_analyze.extract_answers
 import pg_analyze.extract_evaluators
-import pg_analyze.extract_macros
 import pg_analyze.extract_widgets
-import pg_analyze.fs_scan
-import pg_analyze.report_json
-import pg_analyze.report_tsv
-import pg_analyze.schemas
+import pg_analyze.report
 import pg_analyze.tokenize
 import pg_analyze.wire_inputs
+
+
+#============================================
+
+JSON_SCHEMA_VERSION = 2
 
 
 #============================================
@@ -25,7 +26,7 @@ def main() -> None:
 	args = parse_args()
 
 	roots = _default_roots(args.roots)
-	pg_files = pg_analyze.fs_scan.scan_pg_files(roots)
+	pg_files = scan_pg_files(roots)
 
 	json_rows: list[dict] = []
 	needs_review_paths: list[str] = []
@@ -33,14 +34,14 @@ def main() -> None:
 	for file_path in pg_files:
 		report, needs_review = analyze_file(file_path)
 		if args.json_out_dir:
-			pg_analyze.report_json.write_report_json(args.json_out_dir, file_path, report)
+			pg_analyze.report.write_report_json(args.json_out_dir, file_path, report)
 
 		row = build_tsv_row(report=report, needs_review=needs_review)
 		json_rows.append(row)
 		if needs_review:
 			needs_review_paths.append(file_path)
 
-	pg_analyze.report_tsv.write_tsv(args.tsv_out_file, json_rows)
+	pg_analyze.report.write_tsv(args.tsv_out_file, json_rows)
 	_write_needs_review(args.needs_review_file, needs_review_paths)
 
 
@@ -96,20 +97,45 @@ def _default_roots(roots: list[str]) -> list[str]:
 
 #============================================
 
+def scan_pg_files(roots: list[str]) -> list[str]:
+	"""
+	Return a sorted list of .pg file paths under the given roots.
+
+	Returned paths are workspace-relative (using os.sep).
+	"""
+	found: list[str] = []
+	for root in roots:
+		if not os.path.exists(root):
+			continue
+		if os.path.isfile(root):
+			if root.endswith(".pg"):
+				found.append(root)
+			continue
+		for dirpath, dirnames, filenames in os.walk(root):
+			dirnames[:] = [d for d in dirnames if d != ".git"]
+			for filename in filenames:
+				if not filename.endswith(".pg"):
+					continue
+				found.append(os.path.join(dirpath, filename))
+	return sorted(set(found))
+
+
+#============================================
+
 
 def analyze_file(file_path: str) -> tuple[dict, bool]:
 	text = _read_text_latin1(file_path)
 	stripped = pg_analyze.tokenize.strip_comments(text)
 	newlines = pg_analyze.tokenize.build_newline_index(stripped)
 
-	macros = pg_analyze.extract_macros.extract(stripped, newlines=newlines)
+	macros = pg_analyze.extract_evaluators.extract_macros(stripped, newlines=newlines)
 	widgets, pgml_info = pg_analyze.extract_widgets.extract(stripped, newlines=newlines)
 	answers = pg_analyze.extract_answers.extract(stripped, newlines=newlines)
 	evaluators = pg_analyze.extract_evaluators.extract(stripped, newlines=newlines)
 	wiring = pg_analyze.wire_inputs.wire(widgets=widgets, evaluators=evaluators)
 
 	report = {
-		"schema_version": pg_analyze.schemas.JSON_SCHEMA_VERSION,
+		"schema_version": JSON_SCHEMA_VERSION,
 		"file": file_path,
 		"macros": macros,
 		"widgets": widgets,
