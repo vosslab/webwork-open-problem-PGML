@@ -146,59 +146,59 @@ class Aggregator:
 		if isinstance(pgml_blank_marker_count, int):
 			_inc(self.pgml_blank_hist, count_bucket(pgml_blank_marker_count))
 
-			is_other = isinstance(types, list) and ("other" in types)
-			if is_other:
-				self._add_other(record)
+		is_other = isinstance(types, list) and ("other" in types)
+		if is_other:
+			self._add_other(record)
 
-			self._add_cross_tabs(record)
+		self._add_cross_tabs(record)
 
-			if needs_review:
-				self._add_needs_review(record)
+		if needs_review:
+			self._add_needs_review(record)
 
-		def _add_cross_tabs(self, record: dict) -> None:
-			types = record.get("types", [])
-			widgets = record.get("widget_kinds", [])
-			evals = record.get("evaluator_kinds", [])
+	def _add_cross_tabs(self, record: dict) -> None:
+		types = record.get("types", [])
+		widgets = record.get("widget_kinds", [])
+		evals = record.get("evaluator_kinds", [])
 
-			if not isinstance(types, list) or not types:
-				types = ["other"]
-			if not isinstance(widgets, list) or not widgets:
-				widgets = ["none"]
-			if not isinstance(evals, list) or not evals:
-				evals = ["none"]
+		if not isinstance(types, list) or not types:
+			types = ["other"]
+		if not isinstance(widgets, list) or not widgets:
+			widgets = ["none"]
+		if not isinstance(evals, list) or not evals:
+			evals = ["none"]
 
-			type_set = sorted({t for t in types if isinstance(t, str) and t})
-			widget_set = sorted({w for w in widgets if isinstance(w, str) and w})
-			eval_set = sorted({e for e in evals if isinstance(e, str) and e})
+		type_set = sorted({t for t in types if isinstance(t, str) and t})
+		widget_set = sorted({w for w in widgets if isinstance(w, str) and w})
+		eval_set = sorted({e for e in evals if isinstance(e, str) and e})
 
-			if not type_set:
-				type_set = ["other"]
-			if not widget_set:
-				widget_set = ["none"]
-			if not eval_set:
-				eval_set = ["none"]
+		if not type_set:
+			type_set = ["other"]
+		if not widget_set:
+			widget_set = ["none"]
+		if not eval_set:
+			eval_set = ["none"]
 
-			has_widgets = not (len(widget_set) == 1 and widget_set[0] == "none")
-			has_evals = not (len(eval_set) == 1 and eval_set[0] == "none")
+		has_widgets = not (len(widget_set) == 1 and widget_set[0] == "none")
+		has_evals = not (len(eval_set) == 1 and eval_set[0] == "none")
 
-			for t in type_set:
-				for w in widget_set:
-					self.type_by_widget[(t, w)] = self.type_by_widget.get((t, w), 0) + 1
-				for e in eval_set:
-					self.type_by_evaluator[(t, e)] = self.type_by_evaluator.get((t, e), 0) + 1
-
+		for t in type_set:
 			for w in widget_set:
-				for e in eval_set:
-					self.widget_by_evaluator[(w, e)] = self.widget_by_evaluator.get((w, e), 0) + 1
+				self.type_by_widget[(t, w)] = self.type_by_widget.get((t, w), 0) + 1
+			for e in eval_set:
+				self.type_by_evaluator[(t, e)] = self.type_by_evaluator.get((t, e), 0) + 1
 
-			if has_widgets and has_evals:
-				_inc(self.coverage, "widgets=some,evaluators=some")
-			elif has_widgets and (not has_evals):
-				_inc(self.coverage, "widgets=some,evaluators=none")
-			elif (not has_widgets) and has_evals:
-				_inc(self.coverage, "widgets=none,evaluators=some")
-			else:
-				_inc(self.coverage, "widgets=none,evaluators=none")
+		for w in widget_set:
+			for e in eval_set:
+				self.widget_by_evaluator[(w, e)] = self.widget_by_evaluator.get((w, e), 0) + 1
+
+		if has_widgets and has_evals:
+			_inc(self.coverage, "widgets=some,evaluators=some")
+		elif has_widgets and (not has_evals):
+			_inc(self.coverage, "widgets=some,evaluators=none")
+		elif (not has_widgets) and has_evals:
+			_inc(self.coverage, "widgets=none,evaluators=some")
+		else:
+			_inc(self.coverage, "widgets=none,evaluators=none")
 
 	def _add_other(self, record: dict) -> None:
 		bucket = other_bucket(record)
