@@ -12,9 +12,10 @@ DEFAULT_BLOCK_RULES: list[dict[str, str]] = [
 
 DEFAULT_MACRO_RULES: list[dict[str, object]] = [
 	{
+		# PGML.pl loads MathObjects.pl internally, so either satisfies this rule
 		"label": "MathObjects functions",
 		"pattern": r"\b(?:Context|Compute|Formula|Real)\s*\(",
-		"required_macros": ["MathObjects.pl"],
+		"required_macros": ["MathObjects.pl", "PGML.pl"],
 	},
 	{
 		"label": "RadioButtons",

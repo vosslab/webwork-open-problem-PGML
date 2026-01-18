@@ -6,6 +6,23 @@
   improved macro/assignment parsing, line-numbered output, and optional JSON summaries.
 - Add the `pgml_lint/` plugin framework with built-in PGML lint modules and tests, and refactor the lint CLI to use
   the new plugin registry, enable/disable controls, and JSON summaries.
+- Fix MathObjects false positive: recognize that `PGML.pl` loads `MathObjects.pl` internally, so either satisfies
+  the MathObjects macro requirement.
+- Add math span masking (`[`...`]` and `[:...:+]`) to bracket checker to avoid false positives from LaTeX interval
+  notation and other math content.
+- Disable `pgml_brackets` plugin by default since plain brackets in PGML text are common (e.g., `(5,10]` in
+  documentation).
+- Add array/hash variable detection to assignment checker: recognize `@arr =` and `%hash =` patterns to avoid false
+  positives when PGML blanks use `$arr[0]` or `$hash{key}`.
+- Simplify lint CLI for casual users: just `-i`/`-d` for input, `-v`/`-q` for verbosity. Remove plugin configuration
+  options (`--enable`, `--disable`, `--plugin`, `--rules`, `--list-plugins`, `--fail-on-warn`) to make the tool
+  work out of the box without configuration.
+- Add comprehensive PGML lint documentation:
+  - [docs/PGML_LINT.md](docs/PGML_LINT.md): Usage guide and quick start
+  - [docs/PGML_LINT_CONCEPTS.md](docs/PGML_LINT_CONCEPTS.md): PGML syntax concepts the linter validates
+  - [docs/PGML_LINT_PLUGINS.md](docs/PGML_LINT_PLUGINS.md): Reference for all built-in plugins
+  - [docs/PGML_LINT_PLUGIN_DEV.md](docs/PGML_LINT_PLUGIN_DEV.md): Guide for writing custom plugins
+  - [docs/PGML_LINT_ARCHITECTURE.md](docs/PGML_LINT_ARCHITECTURE.md): Internal architecture for contributors
 
 ## 2026-01-17
 

@@ -35,140 +35,68 @@ def parse_args() -> argparse.Namespace:
 		argparse.Namespace: Parsed arguments.
 	"""
 	parser = argparse.ArgumentParser(
-		description="Run a static lint pass on WeBWorK .pg files with PGML checks.",
+		description="Check WeBWorK .pg files for common PGML errors.",
 	)
-	parser.add_argument(
+	# Input - simple and clear
+	input_group = parser.add_mutually_exclusive_group()
+	input_group.add_argument(
 		"-i",
 		"--input",
 		dest="input_file",
-		help="Path to a single .pg file to lint.",
+		help="Check a single .pg file.",
 	)
-	parser.add_argument(
+	input_group.add_argument(
 		"-d",
 		"--directory",
 		dest="input_dir",
-		default=".",
-		help="Directory to scan for .pg files (default: current directory).",
+		help="Check all .pg files in a directory.",
 	)
-	parser.add_argument(
-		"-e",
-		"--extensions",
-		dest="extensions",
-		default=".pg",
-		help="Comma-separated list of file extensions (default: .pg).",
-	)
-	parser.add_argument(
-		"-r",
-		"--rules",
-		dest="rules_file",
-		help="Optional JSON file defining block and macro rules.",
-	)
-	parser.add_argument(
-		"--plugin",
-		dest="plugin_paths",
-		action="append",
-		default=[],
-		help="Path to a plugin module file (repeatable).",
-	)
-	parser.add_argument(
-		"--enable",
-		dest="enable_plugins",
-		action="append",
-		default=[],
-		help="Comma-separated plugin ids to enable.",
-	)
-	parser.add_argument(
-		"--disable",
-		dest="disable_plugins",
-		action="append",
-		default=[],
-		help="Comma-separated plugin ids to disable.",
-	)
-	parser.add_argument(
-		"--only",
-		dest="only_plugins",
-		action="append",
-		default=[],
-		help="Comma-separated plugin ids to run exclusively.",
-	)
-	parser.add_argument(
-		"--list-plugins",
-		dest="list_plugins",
+	# Output control - just verbose or quiet
+	verbosity_group = parser.add_mutually_exclusive_group()
+	verbosity_group.add_argument(
+		"-v",
+		"--verbose",
+		dest="verbose",
 		action="store_true",
-		help="List available plugins and exit.",
+		help="Show more details.",
 	)
-	parser.add_argument(
-		"--show-plugin",
-		dest="show_plugin",
+	verbosity_group.add_argument(
+		"-q",
+		"--quiet",
+		dest="quiet",
 		action="store_true",
-		help="Include plugin id in line output.",
+		help="Only show problems, no summary.",
 	)
+	# JSON for scripting (suppress from help - advanced users know about it)
 	parser.add_argument(
 		"--json",
 		dest="json_output",
 		action="store_true",
-		help="Emit issues and summaries as JSON.",
+		help=argparse.SUPPRESS,
 	)
-	parser.add_argument(
-		"--fail-on-warn",
-		dest="fail_on_warn",
-		action="store_true",
-		help="Exit non-zero if warnings are found.",
+	parser.set_defaults(
+		verbose=False,
+		quiet=False,
+		json_output=False,
 	)
-	parser.set_defaults(fail_on_warn=False, json_output=False, list_plugins=False)
 	args = parser.parse_args()
+	# Default to current directory if no input specified
+	if not args.input_file and not args.input_dir:
+		args.input_dir = "."
 	return args
 
 
 #============================================
 
 
-def _split_csv(values: list[str]) -> set[str]:
-	"""
-	Split comma-separated lists into a set.
-
-	Args:
-		values: List of CSV strings.
-
-	Returns:
-		set[str]: Normalized ids.
-	"""
-	items: set[str] = set()
-	for value in values:
-		for raw in value.split(","):
-			item = raw.strip()
-			if item:
-				items.add(item)
-	return items
+# Default file extension for WeBWorK problem files
+DEFAULT_EXTENSIONS = [".pg"]
 
 
 #============================================
 
 
-def normalize_extensions(extensions: str) -> list[str]:
-	"""
-	Normalize comma-separated extensions into a list.
-
-	Args:
-		extensions: Raw comma-separated string.
-
-	Returns:
-		list[str]: Normalized extensions.
-	"""
-	extensions_list = [ext.strip() for ext in extensions.split(",") if ext.strip()]
-	normalized: list[str] = []
-	for ext in extensions_list:
-		if ext.startswith("."):
-			normalized.append(ext.lower())
-		else:
-			normalized.append(f".{ext.lower()}")
-	return normalized
-
-
-#============================================
-
-
-def find_files(input_dir: str, extensions: list[str]) -> list[str]:
+def find_files(input_dir: str, extensions: list[str] = DEFAULT_EXTENSIONS) -> list[str]:
 	"""
 	Find files under input_dir matching extensions.
 
@@ -194,42 +122,20 @@ def find_files(input_dir: str, extensions: list[str]) -> list[str]:
 #============================================
 
 
-def list_plugins(registry: pgml_lint.registry.Registry) -> None:
-	"""
-	Print available plugins.
-
-	Args:
-		registry: Plugin registry.
-	"""
-	for plugin in registry.list_plugins():
-		plugin_id = str(plugin.get("id"))
-		plugin_name = str(plugin.get("name"))
-		default_flag = "default" if plugin.get("default_enabled") is True else "optional"
-		print(f"{plugin_id}: {plugin_name} ({default_flag})")
-
-
-#============================================
-
-
 def main() -> None:
 	"""
 	Run the lint checker.
 	"""
 	args = parse_args()
-	block_rules, macro_rules = pgml_lint.rules.load_rules(args.rules_file)
+
+	# Use built-in rules and plugins - no configuration needed
+	block_rules, macro_rules = pgml_lint.rules.load_rules(None)
 	registry = pgml_lint.registry.build_registry()
+	plugins = registry.resolve_plugins(set(), set(), set())
 
-	for plugin_path in args.plugin_paths:
-		registry.load_plugin_path(plugin_path)
-
-	if args.list_plugins:
-		list_plugins(registry)
-		return
-
-	only_ids = _split_csv(args.only_plugins)
-	enable_ids = _split_csv(args.enable_plugins)
-	disable_ids = _split_csv(args.disable_plugins)
-	plugins = registry.resolve_plugins(only_ids, enable_ids, disable_ids)
+	if args.verbose:
+		plugin_ids = [str(plugin.get("id")) for plugin in plugins]
+		print(f"Active checks: {', '.join(plugin_ids)}")
 
 	issues: list[dict[str, object]] = []
 	files_checked: list[str] = []
@@ -245,11 +151,12 @@ def main() -> None:
 		issues.extend(file_issues)
 		if not args.json_output:
 			for issue in file_issues:
-				print(pgml_lint.core.format_issue(args.input_file, issue, args.show_plugin))
+				print(pgml_lint.core.format_issue(args.input_file, issue, args.verbose))
 	else:
-		extensions = normalize_extensions(args.extensions)
-		files_to_check = find_files(args.input_dir, extensions)
+		files_to_check = find_files(args.input_dir)
 		files_checked.extend(files_to_check)
+		if args.verbose:
+			print(f"Checking {len(files_to_check)} files in {args.input_dir}")
 		for file_path in files_to_check:
 			file_issues = pgml_lint.engine.lint_file(
 				file_path,
@@ -260,7 +167,7 @@ def main() -> None:
 			issues.extend(file_issues)
 			if not args.json_output:
 				for issue in file_issues:
-					print(pgml_lint.core.format_issue(file_path, issue, args.show_plugin))
+					print(pgml_lint.core.format_issue(file_path, issue, args.verbose))
 
 	error_count, warn_count = pgml_lint.core.summarize_issues(issues)
 
@@ -270,17 +177,16 @@ def main() -> None:
 			"files_checked": len(files_checked),
 			"errors": error_count,
 			"warnings": warn_count,
-			"plugins": plugin_ids,
 			"issues": issues,
 		}
 		print(json.dumps(summary, indent=2))
-	else:
+	elif not args.quiet:
 		if issues:
 			print(f"Found {error_count} errors and {warn_count} warnings.")
+		elif args.verbose:
+			print(f"No issues found in {len(files_checked)} files.")
 
 	if error_count > 0:
-		raise SystemExit(1)
-	if args.fail_on_warn and warn_count > 0:
 		raise SystemExit(1)
 
 

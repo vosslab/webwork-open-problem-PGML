@@ -206,6 +206,61 @@ def scan_pgml_blanks(
 #============================================
 
 
+def _extract_math_spans(block_text: str) -> list[tuple[int, int]]:
+	"""
+	Extract PGML math span positions to exclude from bracket checking.
+
+	PGML math delimiters:
+	- [`...`] for display math
+	- [:...:] for inline math (with optional modifiers like :+)
+
+	Args:
+		block_text: PGML block content.
+
+	Returns:
+		list[tuple[int, int]]: Math span positions (start, end).
+	"""
+	spans: list[tuple[int, int]] = []
+	i = 0
+	while i < len(block_text) - 1:
+		# Check for [`...`] display math
+		if block_text[i:i+2] == "[`":
+			start = i
+			j = i + 2
+			while j < len(block_text) - 1:
+				if block_text[j:j+2] == "`]":
+					spans.append((start, j + 2))
+					i = j + 2
+					break
+				j += 1
+			else:
+				i += 1
+			continue
+		# Check for [:...:] inline math (handles modifiers like :+ :* etc)
+		if block_text[i:i+2] == "[:":
+			start = i
+			j = i + 2
+			while j < len(block_text) - 1:
+				if block_text[j] == ":" and j + 1 < len(block_text) and block_text[j+1] == "]":
+					spans.append((start, j + 2))
+					i = j + 2
+					break
+				# Handle modifiers like :+] or :*]
+				if block_text[j] == ":" and j + 2 < len(block_text) and block_text[j+2] == "]":
+					spans.append((start, j + 3))
+					i = j + 3
+					break
+				j += 1
+			else:
+				i += 1
+			continue
+		i += 1
+	return spans
+
+
+#============================================
+
+
 def check_pgml_bracket_balance(
 	block_text: str,
 	start_offset: int,
@@ -214,7 +269,7 @@ def check_pgml_bracket_balance(
 	blank_spans: list[tuple[int, int]],
 ) -> list[dict[str, object]]:
 	"""
-	Check for unbalanced PGML bracket usage, ignoring blanks and inline code.
+	Check for unbalanced PGML bracket usage, ignoring blanks, inline code, and math.
 
 	Args:
 		block_text: PGML block content.
@@ -227,9 +282,11 @@ def check_pgml_bracket_balance(
 		list[dict[str, object]]: Issue dicts.
 	"""
 	issues: list[dict[str, object]] = []
+	# Extract math spans to exclude from bracket checking
+	math_spans = _extract_math_spans(block_text)
 	masked = list(block_text)
-	for span_start, span_end in inline_spans + blank_spans:
-		for i in range(span_start, span_end):
+	for span_start, span_end in inline_spans + blank_spans + math_spans:
+		for i in range(span_start, min(span_end, len(masked))):
 			masked[i] = " "
 	masked_text = "".join(masked)
 

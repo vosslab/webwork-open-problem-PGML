@@ -4,7 +4,9 @@ import pgml_lint.pgml
 
 PLUGIN_ID = "pgml_brackets"
 PLUGIN_NAME = "PGML bracket balance"
-DEFAULT_ENABLED = True
+# Disabled by default: plain text brackets are common in PGML content
+# (e.g., interval notation like (5,10] in documentation)
+DEFAULT_ENABLED = False
 
 
 #============================================

@@ -9,8 +9,14 @@ BLOCK_MARKER_RX = re.compile(
 )
 
 FILENAME_RX = re.compile(r"""['\"]([^'\"]+\.(?:pl|pg))['\"]""")
+# Match scalar declarations: my $var, our $var
 VAR_DECL_RX = re.compile(r"\b(?:my|our)\s+\$([A-Za-z_][A-Za-z0-9_]*)")
+# Match scalar assignments: $var =
 VAR_ASSIGN_RX = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\s*=")
+# Match array/hash declarations: my @arr, my %hash, our @arr, our %hash
+ARRAY_HASH_DECL_RX = re.compile(r"\b(?:my|our)\s+[@%]([A-Za-z_][A-Za-z0-9_]*)")
+# Match array/hash assignments: @arr =, %hash =
+ARRAY_HASH_ASSIGN_RX = re.compile(r"[@%]([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 MACRO_CALL_NAMES = {"loadMacros", "includePGproblem"}
 
@@ -388,16 +394,28 @@ def extract_assigned_vars(stripped_text: str) -> set[str]:
 	"""
 	Extract Perl variable names that appear declared or assigned.
 
+	Recognizes scalar ($var), array (@arr), and hash (%hash) assignments.
+	Array/hash names are included because PGML blanks reference elements
+	as $arr[0], $hash{key} which use the same base name.
+
 	Args:
 		stripped_text: Comment- and heredoc-stripped text.
 
 	Returns:
-		set[str]: Variable names without leading $.
+		set[str]: Variable names without leading sigil ($/@/%).
 	"""
 	vars_found: set[str] = set()
+	# Scalar declarations: my $var, our $var
 	for match in VAR_DECL_RX.finditer(stripped_text):
 		vars_found.add(match.group(1))
+	# Scalar assignments: $var =
 	for match in VAR_ASSIGN_RX.finditer(stripped_text):
+		vars_found.add(match.group(1))
+	# Array/hash declarations: my @arr, my %hash
+	for match in ARRAY_HASH_DECL_RX.finditer(stripped_text):
+		vars_found.add(match.group(1))
+	# Array/hash assignments: @arr =, %hash =
+	for match in ARRAY_HASH_ASSIGN_RX.finditer(stripped_text):
 		vars_found.add(match.group(1))
 	return vars_found
 
